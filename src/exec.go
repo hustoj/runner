@@ -106,11 +106,11 @@ func (task *RunningTask) detectRegs() bool {
 			return true
 		}
 		if task.prevRax != regs.Orig_rax {
-			logrus.Infof(">> %16v", getName(regs.Orig_rax))
+			logrus.Infof(">>Name %16v", getName(regs.Orig_rax))
 		}
-		logrus.Infof(">> %16v ", regs.Orig_rax)
+		logrus.Infof(">>Value %40X", regs.Rax)
 	} else {
-		logrus.Infof(">> %16v ", getName(regs.Orig_rax))
+		logrus.Infof(">>Name %16v", getName(regs.Orig_rax))
 	}
 	task.prevRax = regs.Orig_rax
 	if task.prevRax == syscall.SYS_EXIT_GROUP {

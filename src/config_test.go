@@ -15,7 +15,7 @@ func TestParseSettingContent(t *testing.T) {
 	}
 }
 
-func Test_parseInt(t *testing.T)  {
+func Test_parseInt(t *testing.T) {
 	ret := 0
 	ret = parseInt("123")
 	if ret != 123 {

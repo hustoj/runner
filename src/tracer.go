@@ -5,7 +5,6 @@ import (
 	"syscall"
 )
 
-
 type TracerDetect struct {
 	Exit    bool
 	prevRax uint64

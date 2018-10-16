@@ -2,7 +2,7 @@ package runner
 
 import "syscall"
 
-func SetTimeLimit(limit int)  {
+func SetTimeLimit(limit int) {
 	rlim := &syscall.Rlimit{}
 	rlim.Cur = uint64(limit)
 	rlim.Max = rlim.Cur + 1
@@ -12,7 +12,7 @@ func SetTimeLimit(limit int)  {
 	//syscall.Syscall(syscall.SIGALRM, limit * 2 + 3)
 }
 
-func SetMemoryLimit(limit int)  {
+func SetMemoryLimit(limit int) {
 	rlim := &syscall.Rlimit{}
 	rlim.Cur = uint64(limit)
 	rlim.Max = rlim.Cur + 1

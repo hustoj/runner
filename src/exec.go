@@ -26,8 +26,8 @@ func (task *RunningTask) trace() {
 	process := &task.process
 
 	tracer := TracerDetect{
-		Pid: task.process.Pid,
-		Exit: true,
+		Pid:     task.process.Pid,
+		Exit:    true,
 		prevRax: 0,
 	}
 

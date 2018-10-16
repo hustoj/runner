@@ -43,6 +43,13 @@ func (process *Process) Exited() bool {
 	return false
 }
 
+func (process *Process) GetTimeCost() int64 {
+	total := process.Rusage.Utime.Sec*1000 + int64(process.Rusage.Utime.Usec/1000)
+	total = total + process.Rusage.Stime.Sec*1000 + int64(process.Rusage.Utime.Usec/1000)
+
+	return total
+}
+
 func (process *Process) Terminate() {
 	logrus.Infof("get signal, send SIGTERM")
 	syscall.Kill(process.Pid, syscall.SIGTERM)

@@ -54,3 +54,14 @@ func (task *RunningTask) trace() {
 		}
 	}
 }
+
+func (task *RunningTask) GetResult()  {
+	task.Time = task.process.GetTimeCost()
+	memory, err := GetProcMemory(task.process.Pid)
+	if err != nil {
+		logrus.Infoln("Get memory failed:", err)
+		return
+	}
+	task.Memory = memory
+	logrus.Infoln(task.Time, task.Memory)
+}

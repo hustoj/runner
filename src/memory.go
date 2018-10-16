@@ -7,17 +7,17 @@ import (
 	"strings"
 )
 
-func GetProcMemory(pid int) (int, error) {
+func GetProcMemory(pid int) (int64, error) {
 	path := fmt.Sprintf("/proc/%d/status", pid)
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
-		panic(fmt.Sprintf("open status file[%s] failed!, %v", path, err))
+		return 0, err
 	}
 
 	return parseMemory(string(content))
 }
 
-func parseMemory(content string) (int, error) {
+func parseMemory(content string) (int64, error) {
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		prefix, value := parseLine(line)
@@ -41,8 +41,8 @@ func parseLine(line string) (string, string) {
 	return strings.Trim(segments[0], " "), strings.Trim(segments[1], " ")
 }
 
-func parseSize(info string) (int, error) {
-	var size int
+func parseSize(info string) (int64, error) {
+	var size int64
 	_, err := fmt.Sscanf(info, "%d kB", &size)
 
 	return size, err

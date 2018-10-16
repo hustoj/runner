@@ -52,7 +52,10 @@ func (task *RunningTask) trace() {
 		if tracer.detect() {
 			break
 		}
+		// before next ptrace,get result, always pass
+		task.GetResult()
 	}
+	logrus.Infof("Time: %d, Memory: %dkb", task.Time, task.Memory)
 }
 
 func (task *RunningTask) GetResult()  {
@@ -63,5 +66,4 @@ func (task *RunningTask) GetResult()  {
 		return
 	}
 	task.Memory = memory
-	logrus.Infoln(task.Time, task.Memory)
 }

@@ -29,10 +29,7 @@ func (task *RunningTask) trace() {
 	task.prevRax = 0
 
 	for ; ; task.Continue() {
-		failed := task.wait()
-		if failed {
-			break
-		}
+		task.wait()
 
 		if task.Exited() {
 			break
@@ -41,12 +38,10 @@ func (task *RunningTask) trace() {
 			logrus.Infoln("Signal by: ", task.status.StopSignal())
 
 			if task.gotTerminate() {
-				logrus.Debugf("\n%#v\n", task.rusage)
-				task.kill(syscall.SIGKILL)
+				task.kill()
 				break
 			} else {
-				logrus.Infof("get signal, send SIGTERM")
-				task.kill(syscall.SIGTERM)
+				task.terminate()
 			}
 			continue
 		}
@@ -56,29 +51,22 @@ func (task *RunningTask) trace() {
 		}
 
 		task.Exit = !task.Exit
-
 	}
 }
 
-func (task *RunningTask) wait() bool {
-	pid1, err := syscall.Wait4(-1, &task.status, 0, &task.rusage)
+func (task *RunningTask) wait() {
+	pid1, err := syscall.Wait4(task.pid, &task.status, 0, &task.rusage)
 	if pid1 == 0 {
-		logrus.Debugf("not found process")
-		return true
+		logrus.Panic("not found process")
 	}
 	checkPanic(err)
-	return false
 }
 
 func (task *RunningTask) Continue() {
 	err := syscall.PtraceSyscall(task.pid, 0)
 	if err != nil {
-		logrus.Infof("err is %v", err)
+		logrus.Infof("PtraceSyscall: err %v", err)
 	}
-}
-
-func (task *RunningTask) kill(signal syscall.Signal) {
-	syscall.Kill(task.pid, signal)
 }
 
 func (task *RunningTask) gotTerminate() bool {
@@ -116,4 +104,14 @@ func (task *RunningTask) detectRegs() bool {
 		logrus.Infof("SYS_EXIT_GROUP")
 	}
 	return false
+}
+
+func (task *RunningTask) terminate() {
+	logrus.Infof("get signal, send SIGTERM")
+	syscall.Kill(task.pid, syscall.SIGTERM)
+}
+
+func (task *RunningTask) kill() {
+	logrus.Debugf("\n%#v\n", task.rusage)
+	syscall.Kill(task.pid, syscall.SIGKILL)
 }

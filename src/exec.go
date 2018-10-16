@@ -14,8 +14,8 @@ type RunningTask struct {
 	Exit        bool
 	prevRax     uint64
 	pid         int
-	status syscall.WaitStatus
-	rusage syscall.Rusage
+	status      syscall.WaitStatus
+	rusage      syscall.Rusage
 }
 
 func (task *RunningTask) Run() {
@@ -28,7 +28,7 @@ func (task *RunningTask) trace() {
 	task.Exit = true
 	task.prevRax = 0
 
-	for {
+	for ; ; task.Continue() {
 		failed := task.wait()
 		if failed {
 			break
@@ -57,7 +57,6 @@ func (task *RunningTask) trace() {
 
 		task.Exit = !task.Exit
 
-		task.Continue()
 	}
 }
 

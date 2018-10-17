@@ -8,10 +8,9 @@ import (
 )
 
 type Setting struct {
-	WorkingDir  string
 	TimeLimit   int
 	MemoryLimit int
-	UserId      int // running user id
+	Language    int // language
 }
 
 func LoadConfig() *Setting {
@@ -24,14 +23,14 @@ func LoadConfig() *Setting {
 
 func ParseSettingContent(content string) *Setting {
 	lines := strings.Split(content, "\n")
-	if len(lines) != 4 {
-		msg := fmt.Sprintf("solution config format invalid")
+	if len(lines) != 3 {
+		msg := fmt.Sprintf("solution config format invalid, %v", lines)
 		panic(msg)
 	}
 	setting := &Setting{
 		TimeLimit:   parseInt(lines[0]),
 		MemoryLimit: parseInt(lines[1]),
-		UserId:      parseInt(lines[2]),
+		Language:    parseInt(lines[2]),
 	}
 
 	return setting

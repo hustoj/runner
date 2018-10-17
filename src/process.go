@@ -19,9 +19,9 @@ func (process *Process) Wait() {
 	checkPanic(err)
 }
 
-func (process *Process) StoppedBySignal() bool {
+func (process *Process) Broken() bool {
 	if !process.Trapped() {
-		logrus.Infoln("Signal by: ", process.Status.StopSignal())
+		logrus.Debugln("Signal by: ", process.Status.StopSignal())
 		return true
 	}
 	return false
@@ -29,10 +29,6 @@ func (process *Process) StoppedBySignal() bool {
 
 func (process *Process) Trapped() bool {
 	return process.Status.StopSignal() == syscall.SIGTRAP
-}
-
-func (process *Process) GotTermSignal() bool {
-	return process.Status.StopSignal() == syscall.SIGTERM
 }
 
 func (process *Process) Exited() bool {

@@ -50,11 +50,6 @@ func (process *Process) GetTimeCost() int64 {
 	return total
 }
 
-func (process *Process) Terminate() {
-	logrus.Infof("get signal, send SIGTERM")
-	syscall.Kill(process.Pid, syscall.SIGTERM)
-}
-
 func (process *Process) Kill() {
 	logrus.Debugf("\n%#v\n", process.Rusage)
 	syscall.Kill(process.Pid, syscall.SIGKILL)

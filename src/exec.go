@@ -35,6 +35,7 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
+			task.GetResult()
 			break
 		}
 		if process.StoppedBySignal() {
@@ -44,9 +45,9 @@ func (task *RunningTask) trace() {
 				break
 			}
 
-			// other signal, send signal term to process
-			process.Terminate()
-			continue
+			// other signal, send kill to process
+			process.Kill()
+			break
 		}
 
 		if tracer.detect() {

@@ -41,10 +41,7 @@ func (res *Result) detectSignal(signal os.Signal) {
 		res.RetCode = OUTPUT_LIMIT
 		return
 	}
-	if signal == syscall.SIGSEGV {
-		res.RetCode = MEMORY_LIMIT
-		return
-	}
+
 	res.RetCode = RUNTIME_ERROR
 }
 

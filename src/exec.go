@@ -59,6 +59,7 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
+			task.refreshTimeCost()
 			task.Result.RetCode = ACCEPT
 			break
 		}
@@ -75,20 +76,38 @@ func (task *RunningTask) trace() {
 		if tracer.detect() {
 			break
 		}
-		// before next ptrace,get result, always pass
+		// before next ptrace, get result, always pass
 		task.GetResult()
 	}
-	logrus.Infoln(task.Result.String())
+	task.writeResult()
 }
 
-func (task *RunningTask) GetResult() {
+func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
+	if task.Result.TimeCost > int64(task.setting.TimeLimit) * 1000 {
+		task.Result.RetCode = TIME_LIMIT
+		task.process.Kill()
+	}
+}
+
+func (task *RunningTask) refreshMemory() {
 	memory, err := GetProcMemory(task.process.Pid)
 	if err != nil {
 		logrus.Infoln("Get memory failed:", err)
 		return
 	}
 	task.Result.Memory = memory
+
+	// detect memory is over limit
+	if task.Result.Memory > int64(task.setting.MemoryLimit) * 1024 {
+		task.Result.RetCode = MEMORY_LIMIT
+		task.process.Kill()
+	}
+}
+
+func (task *RunningTask) GetResult() {
+	task.refreshTimeCost()
+	task.refreshMemory()
 }
 
 func (task *RunningTask) resetIO() {
@@ -137,4 +156,7 @@ func (task *RunningTask) setResourceLimit() {
 	if err != nil {
 		logrus.Panic(err)
 	}
+}
+func (task *RunningTask) writeResult() {
+	logrus.Infoln(task.Result.String())
 }

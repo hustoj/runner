@@ -10,8 +10,8 @@ func TestParseSettingContent(t *testing.T) {
 	if result.MemoryLimit != 34 {
 		t.Errorf("parse memory limit failed! expect: 34, actual %d", result.MemoryLimit)
 	}
-	if result.UserId != 56 {
-		t.Errorf("parse user id failed! expect: 56, actual %d", result.MemoryLimit)
+	if result.Language != 56 {
+		t.Errorf("parse language id failed! expect: 56, actual %d", result.Language)
 	}
 }
 

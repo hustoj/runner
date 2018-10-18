@@ -23,8 +23,8 @@ func LoadConfig() *Setting {
 
 func ParseSettingContent(content string) *Setting {
 	lines := strings.Split(content, "\n")
-	if len(lines) != 3 {
-		msg := fmt.Sprintf("solution config format invalid, %v", lines)
+	if len(lines) < 3 {
+		msg := fmt.Sprintf("solution config format invalid, %d, %v", len(lines), lines)
 		panic(msg)
 	}
 	setting := &Setting{

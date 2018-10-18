@@ -16,7 +16,7 @@ type Setting struct {
 func LoadConfig() *Setting {
 	contents, err := ioutil.ReadFile("case.conf")
 	if err != nil {
-		panic(fmt.Sprintf("read solution config failed: %v", err))
+		log.Panicln(fmt.Sprintf("read solution config failed: %v", err))
 	}
 	return ParseSettingContent(string(contents))
 }
@@ -25,7 +25,7 @@ func ParseSettingContent(content string) *Setting {
 	lines := strings.Split(content, "\n")
 	if len(lines) < 3 {
 		msg := fmt.Sprintf("solution config format invalid, %d, %v", len(lines), lines)
-		panic(msg)
+		log.Panicln(msg)
 	}
 	setting := &Setting{
 		TimeLimit:   parseInt(lines[0]),
@@ -39,7 +39,7 @@ func ParseSettingContent(content string) *Setting {
 func parseInt(content string) int {
 	number, err := strconv.Atoi(content)
 	if err != nil {
-		panic("parse int failed")
+		log.Panicln("parse int failed")
 	}
 
 	return number

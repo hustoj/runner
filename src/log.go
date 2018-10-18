@@ -5,13 +5,17 @@ import (
 	"os"
 )
 
+var log *logrus.Logger
+
 func init() {
-	logrus.SetOutput(os.Stdout)
-	logrus.SetLevel(logrus.DebugLevel)
+	log = logrus.New()
+
+	log.SetLevel(logrus.DebugLevel)
+	log.Out = os.Stdout
 }
 
 func checkPanic(err error) {
 	if err != nil {
-		logrus.Panic(err)
+		log.Panic(err)
 	}
 }

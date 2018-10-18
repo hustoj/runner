@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"github.com/sirupsen/logrus"
 	"os"
 	"syscall"
 )
@@ -16,13 +15,13 @@ func (task *RunningTask) init() {
 	task.Result.Init()
 
 	task.setting = LoadConfig()
-	logrus.Infoln(task.setting)
+	log.Infoln(task.setting)
 }
 
 func (task *RunningTask) execute() int {
 	pid := fork()
 	if pid < 0 {
-		logrus.Panic("fork child failed")
+		log.Panic("fork child failed")
 	}
 	if pid == 0 {
 		// here is child
@@ -41,7 +40,7 @@ func (task *RunningTask) Run() {
 	// execute task
 	pid := task.execute()
 
-	logrus.Debugf("child pid is %d", pid)
+	log.Debugf("child pid is %d", pid)
 	task.process.Pid = pid
 	task.trace()
 }
@@ -60,14 +59,14 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
-			logrus.Infoln("program exited!", process.Status.StopSignal())
+			log.Infoln("program exited!", process.Status.StopSignal())
 			task.refreshTimeCost()
 			task.Result.RetCode = ACCEPT
 			break
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			logrus.Infoln("Signal by: ", process.Status.StopSignal())
+			log.Infoln("Signal by: ", process.Status.StopSignal())
 			task.GetResult()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
@@ -96,7 +95,7 @@ func (task *RunningTask) refreshTimeCost() {
 func (task *RunningTask) refreshMemory() {
 	memory, err := GetProcMemory(task.process.Pid)
 	if err != nil {
-		logrus.Infoln("Get memory failed:", err)
+		log.Infoln("Get memory failed:", err)
 		return
 	}
 	if memory > task.Result.Memory {
@@ -118,15 +117,15 @@ func (task *RunningTask) GetResult() {
 func (task *RunningTask) resetIO() {
 	infile, err := os.OpenFile("user.in", os.O_RDONLY|os.O_CREATE, 0666);
 	if err != nil {
-		logrus.Panic("open input data file failed", err)
+		log.Panic("open input data file failed", err)
 	}
 	outfile, err := os.OpenFile("user.out", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
-		logrus.Panic("open user output file failed", err)
+		log.Panic("open user output file failed", err)
 	}
 	errfile, err := os.OpenFile("user.err", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
-		logrus.Panic("open err file failed:", err)
+		log.Panic("open err file failed:", err)
 	}
 
 	fileDup(infile, os.Stdin)
@@ -141,7 +140,7 @@ func (task *RunningTask) setResourceLimit() {
 	rLimit.Cur = uint64(task.setting.TimeLimit)
 	err := syscall.Setrlimit(syscall.RLIMIT_CPU, &rLimit)
 	if err != nil {
-		logrus.Panic(err)
+		log.Panic(err)
 	}
 
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(rLimit.Max), 0, 0)
@@ -151,7 +150,7 @@ func (task *RunningTask) setResourceLimit() {
 	rLimit.Cur = 128 << 10 // 128kb
 	err = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &rLimit)
 	if err != nil {
-		logrus.Panic(err)
+		log.Panic(err)
 	}
 
 	// max memory size
@@ -160,9 +159,9 @@ func (task *RunningTask) setResourceLimit() {
 	err = syscall.Setrlimit(syscall.RLIMIT_STACK, &rLimit)
 	err = syscall.Setrlimit(syscall.RLIMIT_DATA, &rLimit)
 	if err != nil {
-		logrus.Panic(err)
+		log.Panic(err)
 	}
 }
 func (task *RunningTask) writeResult() {
-	logrus.Infoln(task.Result.String())
+	log.Infoln(task.Result.String())
 }

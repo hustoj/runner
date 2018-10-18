@@ -7,19 +7,20 @@ import (
 )
 
 const (
-	WT0           = 0
-	WT1           = 1
-	CI            = 2
-	RI            = 3
-	ACCEPT        = 4
-	PRESENT_ERR   = 5
-	WRONG_ANSWER  = 6
-	TIME_LIMIT    = 7
-	MEMORY_LIMIT  = 8
-	OUTPUT_LIMIT  = 9
-	RUNTIME_ERROR = 10
-	COMPILE_ERROR = 11
-	CO            = 12
+	PENDING            = 0
+	PENDING_REJUDGE    = 1
+	COMPILING          = 2
+	REJUDGING          = 3
+	ACCEPT             = 4
+	PRESENTATION_ERROR = 5
+	WRONG_ANSWER       = 6
+	TIME_LIMIT         = 7
+	MEMORY_LIMIT       = 8
+	OUTPUT_LIMIT       = 9
+	RUNTIME_ERROR      = 10
+	COMPILE_ERROR      = 11
+	COMPILE_OK         = 12
+	TEST_RUN           = 13
 )
 
 type Result struct {

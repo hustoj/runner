@@ -6,7 +6,6 @@ import (
 
 func main() {
 	task := runner.RunningTask{}
-	runner.set
 	task.Init(runner.LoadConfig())
 	task.Run()
 

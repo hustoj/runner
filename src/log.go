@@ -10,8 +10,11 @@ var log *logrus.Logger
 func init() {
 	log = logrus.New()
 
-	log.SetLevel(logrus.DebugLevel)
 	log.Out = os.Stdout
+}
+
+func Debug() {
+	log.SetLevel(logrus.DebugLevel)
 }
 
 func checkPanic(err error) {

@@ -1,12 +1,15 @@
 package main
 
 import (
-	"github.com/sirupsen/logrus"
 	"hustoj/runner/src"
 )
 
 func main() {
-	logrus.SetLevel(logrus.InfoLevel)
 	task := runner.RunningTask{}
+	runner.set
+	task.Init(runner.LoadConfig())
 	task.Run()
+
+	task.GetResult()
+
 }

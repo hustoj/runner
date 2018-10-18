@@ -8,14 +8,15 @@ import (
 type RunningTask struct {
 	setting     *Setting
 	process     Process
-	Result      Result
+	Result      *Result
 }
 
-func (task *RunningTask) init() {
-	task.Result.Init()
+func (task *RunningTask) Init(setting *Setting) {
+	task.Result = &Result{}
+	task.setting = setting
 
-	task.setting = LoadConfig()
-	log.Infoln(task.setting)
+	task.Result.Init()
+	log.Debugln(task.setting)
 }
 
 func (task *RunningTask) execute() int {
@@ -35,14 +36,18 @@ func (task *RunningTask) execute() int {
 }
 
 func (task *RunningTask) Run() {
-	// loading config
-	task.init()
 	// execute task
 	pid := task.execute()
 
 	log.Debugf("child pid is %d", pid)
 	task.process.Pid = pid
 	task.trace()
+}
+
+func (task *RunningTask) GetResult() *Result {
+	log.Debugln(task.Result.String())
+
+	return task.Result
 }
 
 func (task *RunningTask) trace() {
@@ -59,7 +64,7 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
-			log.Infoln("program exited!", process.Status.StopSignal())
+			log.Debugln("program exited!", process.Status.StopSignal())
 			task.refreshTimeCost()
 			task.Result.RetCode = ACCEPT
 			break
@@ -67,7 +72,7 @@ func (task *RunningTask) trace() {
 		if process.Broken() {
 			// break by other signal but SIGTRAP
 			log.Infoln("Signal by: ", process.Status.StopSignal())
-			task.GetResult()
+			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
 			process.Kill()
@@ -78,10 +83,9 @@ func (task *RunningTask) trace() {
 			break
 		}
 		// before next ptrace, get result, always pass
-		task.GetResult()
+		task.parseRunningInfo()
 		process.Continue()
 	}
-	task.writeResult()
 }
 
 func (task *RunningTask) refreshTimeCost() {
@@ -109,7 +113,7 @@ func (task *RunningTask) refreshMemory() {
 	}
 }
 
-func (task *RunningTask) GetResult() {
+func (task *RunningTask) parseRunningInfo() {
 	task.refreshTimeCost()
 	task.refreshMemory()
 }
@@ -162,6 +166,4 @@ func (task *RunningTask) setResourceLimit() {
 		log.Panic(err)
 	}
 }
-func (task *RunningTask) writeResult() {
-	log.Infoln(task.Result.String())
-}
+

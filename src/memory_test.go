@@ -31,7 +31,7 @@ VmHWM:      7308 kB
 VmRSS:      5640 kB
 `
 	ret, _ := parseMemory(fileContent)
-	if ret != 7308 {
+	if ret != 145164 {
 		t.Errorf("Memory parse failed, %d", ret)
 	}
 }

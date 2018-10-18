@@ -20,8 +20,8 @@ func GetProcMemory(pid int) (int64, error) {
 func parseMemory(content string) (int64, error) {
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
-		prefix, value := parseLine(line)
-		if prefix == "VmHWM" {
+		if strings.HasPrefix(line, "VmPeak") {
+			_, value := parseLine(line)
 			ret, err := parseSize(value)
 			if err != nil {
 				return ret, err

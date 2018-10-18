@@ -9,9 +9,13 @@ type Process struct {
 	Pid    int
 	Status syscall.WaitStatus
 	Rusage syscall.Rusage
+	IsKilled bool
 }
 
 func (process *Process) Wait() {
+	if process.IsKilled {
+		return
+	}
 	pid1, err := syscall.Wait4(process.Pid, &process.Status, 0, &process.Rusage)
 	if pid1 == 0 {
 		logrus.Panic("not found process")
@@ -32,6 +36,9 @@ func (process *Process) Trapped() bool {
 }
 
 func (process *Process) Exited() bool {
+	if process.IsKilled {
+		return true
+	}
 	if process.Status.Exited() {
 		logrus.Infof("Exited: %#v\n", process.Rusage)
 		return true
@@ -46,11 +53,15 @@ func (process *Process) GetTimeCost() int64 {
 }
 
 func (process *Process) Kill() {
-	logrus.Debugf("\n%#v\n", process.Rusage)
+	logrus.Infof("%#v\n", process.Rusage)
+	process.IsKilled = true
 	syscall.Kill(process.Pid, syscall.SIGKILL)
 }
 
 func (process *Process) Continue() {
+	if process.IsKilled {
+		return
+	}
 	err := syscall.PtraceSyscall(process.Pid, 0)
 	if err != nil {
 		logrus.Infof("PtraceSyscall: err %v", err)

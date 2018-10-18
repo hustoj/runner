@@ -48,6 +48,7 @@ func (task *RunningTask) Run() {
 
 func (task *RunningTask) trace() {
 	process := &task.process
+	process.IsKilled = false
 
 	tracer := TracerDetect{
 		Pid:     task.process.Pid,
@@ -55,17 +56,18 @@ func (task *RunningTask) trace() {
 		prevRax: 0,
 	}
 
-	for ; ; process.Continue() {
+	for {
 		process.Wait()
 
 		if process.Exited() {
+			logrus.Infoln("program exited!", process.Status.StopSignal())
 			task.refreshTimeCost()
 			task.Result.RetCode = ACCEPT
 			break
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			logrus.Debugln("Signal by: ", process.Status.StopSignal())
+			logrus.Infoln("Signal by: ", process.Status.StopSignal())
 			task.GetResult()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
@@ -78,6 +80,7 @@ func (task *RunningTask) trace() {
 		}
 		// before next ptrace, get result, always pass
 		task.GetResult()
+		process.Continue()
 	}
 	task.writeResult()
 }
@@ -96,7 +99,9 @@ func (task *RunningTask) refreshMemory() {
 		logrus.Infoln("Get memory failed:", err)
 		return
 	}
-	task.Result.Memory = memory
+	if memory > task.Result.Memory {
+		task.Result.Memory = memory
+	}
 
 	// detect memory is over limit
 	if task.Result.Memory > int64(task.setting.MemoryLimit) * 1024 {
@@ -153,6 +158,7 @@ func (task *RunningTask) setResourceLimit() {
 	rLimit.Max = uint64(task.setting.MemoryLimit<<20) + 1<<20
 	rLimit.Cur = uint64(task.setting.MemoryLimit << 20)
 	err = syscall.Setrlimit(syscall.RLIMIT_STACK, &rLimit)
+	err = syscall.Setrlimit(syscall.RLIMIT_DATA, &rLimit)
 	if err != nil {
 		logrus.Panic(err)
 	}

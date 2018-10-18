@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -29,7 +28,7 @@ func parseMemory(content string) (int64, error) {
 			return ret, nil
 		}
 	}
-	return 0, errors.New("parse memory failed")
+	return 0, nil
 }
 
 func parseLine(line string) (string, string) {

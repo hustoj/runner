@@ -66,7 +66,6 @@ func (task *RunningTask) trace() {
 		if process.Exited() {
 			log.Debugln("program exited!", process.Status.StopSignal())
 			task.refreshTimeCost()
-			task.Result.RetCode = ACCEPT
 			break
 		}
 		if process.Broken() {
@@ -92,6 +91,7 @@ func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
 	if task.Result.TimeCost > int64(task.setting.TimeLimit) * 1000 {
 		task.Result.RetCode = TIME_LIMIT
+		log.Debugln("kill by time limit:", task.Result.TimeCost, task.setting.TimeLimit)
 		task.process.Kill()
 	}
 }
@@ -109,6 +109,7 @@ func (task *RunningTask) refreshMemory() {
 	// detect memory is over limit
 	if task.Result.Memory > int64(task.setting.MemoryLimit) * 1024 {
 		task.Result.RetCode = MEMORY_LIMIT
+		log.Debugln("kill by memory limit:", task.Result.Memory, task.setting.MemoryLimit)
 		task.process.Kill()
 	}
 }

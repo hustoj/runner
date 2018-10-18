@@ -52,7 +52,7 @@ func (process *Process) GetTimeCost() int64 {
 }
 
 func (process *Process) Kill() {
-	log.Debugf("%#v\n", process.Rusage)
+	log.Debugf("kill, %#v\n", process.Rusage)
 	process.IsKilled = true
 	syscall.Kill(process.Pid, syscall.SIGKILL)
 }

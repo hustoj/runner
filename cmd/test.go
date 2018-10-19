@@ -2,18 +2,37 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"hustoj/runner/src"
+	"os"
+	"strconv"
 )
 
 func main() {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	go func() {
-		for t := range ticker.C {
-			fmt.Println("tick", t)
-		}
-	}()
+	setting := &runner.Setting{}
+	if len(os.Args) < 3 {
+		panic("argument should be time, memory, retcode")
+	}
 
-	time.Sleep(1600 * time.Millisecond)
-	ticker.Stop()
-	fmt.Println("Ticker stopped")
+	setting.TimeLimit = parseArg(1)
+	setting.MemoryLimit = parseArg(2)
+
+	retCode := parseArg(3)
+
+	task := runner.RunningTask{}
+	task.Init(setting)
+	task.Run()
+
+	result := task.GetResult()
+
+	if result.RetCode != retCode {
+		fmt.Printf("retcode not match, expect: %d, actual: %d\n", retCode, result.RetCode)
+	}
+}
+
+func parseArg(index int) int {
+	ret, err := strconv.Atoi(os.Args[index])
+	if err != nil {
+		panic(err)
+	}
+	return ret
 }

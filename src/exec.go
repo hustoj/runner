@@ -28,6 +28,7 @@ func (task *RunningTask) execute() int {
 		// here is child
 		task.resetIO()
 		task.limitResource()
+		task.allowSyscall()
 		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
 		syscall.Exec("./Main", nil, nil)
 	}
@@ -163,6 +164,13 @@ func (task *RunningTask) limitResource() {
 	// The maximum size of the process's virtual memory (address space) in bytes
 	// will cause SIGSEGV
 	setResourceLimit(syscall.RLIMIT_AS, &rLimit)
+}
+
+func (task *RunningTask) allowSyscall() {
+	scs := []string{"ptrace", "execve", "read", "write", "brk", "fstat",
+		"uname", "mmap", "arch_prctl", "exit_group", "nanosleep", "readlink",
+		"access"}
+	allowSyscall(scs)
 }
 
 func setResourceLimit(code int, rLimit *syscall.Rlimit) {

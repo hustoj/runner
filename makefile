@@ -27,3 +27,11 @@ test:
 	gcc ./tests/tle2.c -o bin/tle2 -static
 	@rm bin/Main;ln -s tle2 bin/Main
 	@cd bin;./test 1 1 8
+
+	gcc ./tests/fork.c -o bin/fork -static
+	@rm bin/Main;ln -s fork bin/Main
+	@cd bin;./test 1 10 10
+
+	g++ tests/thread.c -o bin/thread -static -std=gnu++11 -lpthread
+	@rm bin/Main;ln -s thread bin/Main
+	@cd bin;./test 1 10 10

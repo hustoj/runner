@@ -6,9 +6,9 @@ import (
 )
 
 type RunningTask struct {
-	setting     *Setting
-	process     Process
-	Result      *Result
+	setting *Setting
+	process Process
+	Result  *Result
 }
 
 func (task *RunningTask) Init(setting *Setting) {
@@ -27,7 +27,7 @@ func (task *RunningTask) execute() int {
 	if pid == 0 {
 		// here is child
 		task.resetIO()
-		task.setResourceLimit()
+		task.limitResource()
 		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
 		syscall.Exec("./Main", nil, nil)
 	}
@@ -89,7 +89,7 @@ func (task *RunningTask) trace() {
 
 func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
-	if task.Result.TimeCost > int64(task.setting.TimeLimit) * 1000 {
+	if task.Result.TimeCost > int64(task.setting.TimeLimit)*1000 {
 		task.Result.RetCode = TIME_LIMIT
 		log.Debugln("kill by time limit:", task.Result.TimeCost, task.setting.TimeLimit)
 		task.process.Kill()
@@ -107,7 +107,7 @@ func (task *RunningTask) refreshMemory() {
 	}
 
 	// detect memory is over limit
-	if task.Result.Memory > int64(task.setting.MemoryLimit) * 1024 {
+	if task.Result.Memory > int64(task.setting.MemoryLimit)*1024 {
 		task.Result.RetCode = MEMORY_LIMIT
 		log.Debugln("kill by memory limit:", task.Result.Memory, task.setting.MemoryLimit)
 		task.process.Kill()
@@ -138,33 +138,36 @@ func (task *RunningTask) resetIO() {
 	fileDup(errfile, os.Stderr)
 }
 
-func (task *RunningTask) setResourceLimit() {
+func (task *RunningTask) limitResource() {
 	var rLimit syscall.Rlimit
 	// max execute time
-	rLimit.Max = uint64(task.setting.TimeLimit + 1)
 	rLimit.Cur = uint64(task.setting.TimeLimit)
-	err := syscall.Setrlimit(syscall.RLIMIT_CPU, &rLimit)
-	if err != nil {
-		log.Panic(err)
-	}
+	rLimit.Max = rLimit.Cur + 1
+	setResourceLimit(syscall.RLIMIT_CPU, &rLimit)
 
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(rLimit.Max), 0, 0)
 
 	// max file output size
 	rLimit.Max = 256 << 10 // 256kb
 	rLimit.Cur = 128 << 10 // 128kb
-	err = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &rLimit)
-	if err != nil {
-		log.Panic(err)
-	}
+	setResourceLimit(syscall.RLIMIT_FSIZE, &rLimit)
 
 	// max memory size
-	rLimit.Max = uint64(task.setting.MemoryLimit<<20) + 1<<20
-	rLimit.Cur = uint64(task.setting.MemoryLimit << 20)
-	err = syscall.Setrlimit(syscall.RLIMIT_STACK, &rLimit)
-	err = syscall.Setrlimit(syscall.RLIMIT_DATA, &rLimit)
+	rLimit.Cur = uint64(task.setting.MemoryLimit<<20)*4 // 4 times
+	rLimit.Max = rLimit.Cur + 5<<20 // more 5M
+	// The maximum size of the process stack, in bytes
+	// will cause SIGSEGV
+	setResourceLimit(syscall.RLIMIT_STACK, &rLimit)
+	// The maximum size of the process's data segment (initialized data, uninitialized data, and heap)
+	setResourceLimit(syscall.RLIMIT_DATA, &rLimit)
+	// The maximum size of the process's virtual memory (address space) in bytes
+	// will cause SIGSEGV
+	setResourceLimit(syscall.RLIMIT_AS, &rLimit)
+}
+
+func setResourceLimit(code int, rLimit *syscall.Rlimit) {
+	err := syscall.Setrlimit(code, rLimit)
 	if err != nil {
 		log.Panic(err)
 	}
 }
-

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"hustoj/runner/src"
 )
 
@@ -9,6 +10,6 @@ func main() {
 	task.Init(runner.LoadConfig())
 	task.Run()
 
-	task.GetResult()
-
+	result := task.GetResult()
+	fmt.Println(result)
 }

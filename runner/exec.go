@@ -167,10 +167,10 @@ func (task *RunningTask) limitResource() {
 }
 
 func (task *RunningTask) allowSyscall() {
-	scs := []string{"ptrace", "execve", "read", "write", "brk", "fstat",
-		"uname", "mmap", "arch_prctl", "exit_group", "nanosleep", "readlink",
-		"access"}
-	allowSyscall(scs)
+	//scs := []string{"ptrace", "execve", "read", "write", "brk", "fstat",
+	//	"uname", "mmap", "arch_prctl", "exit_group", "nanosleep", "readlink",
+	//	"access"}
+	//allowSyscall(scs)
 }
 
 func setResourceLimit(code int, rLimit *syscall.Rlimit) {

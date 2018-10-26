@@ -24,9 +24,9 @@ const (
 )
 
 type Result struct {
-	RetCode  int
-	Memory   int64
-	TimeCost int64
+	RetCode  int	`json:"status"`
+	Memory   int64	`json:"memory"`
+	TimeCost int64	`json:"time"`
 }
 
 func (res *Result) String() string {

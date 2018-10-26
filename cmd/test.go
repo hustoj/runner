@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"hustoj/runner/src"
+	"hustoj/runner/runner"
 	"os"
 	"strconv"
 )
 
 func main() {
+	runner.Debug()
 	setting := &runner.Setting{}
 	if len(os.Args) < 3 {
 		panic("argument should be time, memory, retcode")

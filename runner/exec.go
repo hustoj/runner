@@ -9,14 +9,16 @@ type RunningTask struct {
 	setting *Setting
 	process Process
 	Result  *Result
+	timeLimit int64
 }
 
 func (task *RunningTask) Init(setting *Setting) {
 	task.Result = &Result{}
 	task.setting = setting
+	task.timeLimit = int64(setting.TimeLimit) * 1000
 
 	task.Result.Init()
-	log.Debugln(task.setting)
+	log.Debugf("load case config %v\n", task.setting)
 }
 
 func (task *RunningTask) execute() int {
@@ -90,9 +92,9 @@ func (task *RunningTask) trace() {
 
 func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
-	if task.Result.TimeCost > int64(task.setting.TimeLimit)*1000 {
+	if task.Result.TimeCost > task.timeLimit {
 		task.Result.RetCode = TIME_LIMIT
-		log.Debugln("kill by time limit:", task.Result.TimeCost, task.setting.TimeLimit)
+		log.Debugf("kill by time limit: current %d, limit %d\n", task.Result.TimeCost, task.setting.TimeLimit)
 		task.process.Kill()
 	}
 }
@@ -121,7 +123,7 @@ func (task *RunningTask) parseRunningInfo() {
 }
 
 func (task *RunningTask) resetIO() {
-	infile, err := os.OpenFile("user.in", os.O_RDONLY|os.O_CREATE, 0666);
+	infile, err := os.OpenFile("user.in", os.O_RDONLY|os.O_CREATE, 0666)
 	if err != nil {
 		log.Panic("open input data file failed", err)
 	}

@@ -48,7 +48,7 @@ func (process *Process) Exited() bool {
 func (process *Process) GetTimeCost() int64 {
 	total := process.Rusage.Utime.Nano() + process.Rusage.Stime.Nano()
 
-	return total / 1000
+	return total / 1000 / 1000
 }
 
 func (process *Process) Kill() {

@@ -17,5 +17,6 @@ func main() {
 	task.Run()
 
 	result := task.GetResult()
-	fmt.Println(json.Marshal(result))
+	content, _ := json.Marshal(result)
+	fmt.Println(string(content))
 }

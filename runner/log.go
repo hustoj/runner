@@ -10,7 +10,11 @@ var log *logrus.Logger
 func init() {
 	log = logrus.New()
 
-	log.Out = os.Stdout
+	file, err := os.OpenFile("/var/log/runner/runner.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Panicln("open log file failed!", err)
+	}
+	log.Out = file
 }
 
 func Debug() {

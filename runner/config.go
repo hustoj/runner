@@ -1,16 +1,15 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"strconv"
-	"strings"
 )
 
 type Setting struct {
-	TimeLimit   int
-	MemoryLimit int
-	Language    int // language
+	TimeLimit   int `json:"time_limit"`
+	MemoryLimit int `json:"memory_limit"`
+	Language    int `json:"language"`
 }
 
 func LoadConfig() *Setting {
@@ -18,29 +17,15 @@ func LoadConfig() *Setting {
 	if err != nil {
 		log.Panicln(fmt.Sprintf("read solution config failed: %v", err))
 	}
-	return ParseSettingContent(string(contents))
+	return ParseSettingContent(contents)
 }
 
-func ParseSettingContent(content string) *Setting {
-	lines := strings.Split(content, "\n")
-	if len(lines) < 3 {
-		msg := fmt.Sprintf("solution config format invalid, %d, %v", len(lines), lines)
-		log.Panicln(msg)
-	}
-	setting := &Setting{
-		TimeLimit:   parseInt(lines[0]),
-		MemoryLimit: parseInt(lines[1]),
-		Language:    parseInt(lines[2]),
-	}
-
-	return setting
-}
-
-func parseInt(content string) int {
-	number, err := strconv.Atoi(content)
+func ParseSettingContent(content []byte) *Setting {
+	conf := &Setting{}
+	err := json.Unmarshal(content, conf)
 	if err != nil {
-		log.Panicln("parse int failed")
+		log.Panicf("parse case config failed : %v", err)
 	}
 
-	return number
+	return conf
 }

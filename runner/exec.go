@@ -67,7 +67,7 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
-			log.Debugln("program exited!", process.Status.StopSignal())
+			log.Infoln("program exited!", process.Status.StopSignal())
 			task.refreshTimeCost()
 			break
 		}

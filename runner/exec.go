@@ -27,7 +27,7 @@ func (task *RunningTask) execute() int {
 		log.Panic("fork child failed")
 	}
 	if pid == 0 {
-		// here is child
+		// enter child
 		task.resetIO()
 		task.limitResource()
 		task.allowSyscall()
@@ -123,49 +123,38 @@ func (task *RunningTask) parseRunningInfo() {
 }
 
 func (task *RunningTask) resetIO() {
-	infile, err := os.OpenFile("user.in", os.O_RDONLY|os.O_CREATE, 0666)
-	if err != nil {
-		log.Panic("open input data file failed", err)
-	}
-	outfile, err := os.OpenFile("user.out", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		log.Panic("open user output file failed", err)
-	}
-	errfile, err := os.OpenFile("user.err", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		log.Panic("open err file failed:", err)
-	}
-
-	fileDup(infile, os.Stdin)
-	fileDup(outfile, os.Stdout)
-	fileDup(errfile, os.Stderr)
+	dupFileForRead("user.in", os.Stdin)
+	dupFileForWrite("user.out", os.Stdout)
+	dupFileForWrite("user.err", os.Stderr)
 }
 
 func (task *RunningTask) limitResource() {
-	var rLimit syscall.Rlimit
 	// max execute time
-	rLimit.Cur = uint64(task.setting.TimeLimit)
-	rLimit.Max = rLimit.Cur + 1
-	setResourceLimit(syscall.RLIMIT_CPU, &rLimit)
+	timeLimit := uint64(task.setting.TimeLimit)
+	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 1, Cur: timeLimit})
 
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(rLimit.Max), 0, 0)
+	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit), 0, 0)
 
 	// max file output size
-	rLimit.Max = 256 << 10 // 256kb
-	rLimit.Cur = 128 << 10 // 128kb
-	setResourceLimit(syscall.RLIMIT_FSIZE, &rLimit)
+	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
+		Max: 256 << 10, // 256kb
+		Cur: 128 << 10, // 128kb
+	})
 
 	// max memory size
-	rLimit.Cur = uint64(task.setting.MemoryLimit<<20)*4 // 4 times
-	rLimit.Max = rLimit.Cur + 5<<20 // more 5M
 	// The maximum size of the process stack, in bytes
 	// will cause SIGSEGV
-	setResourceLimit(syscall.RLIMIT_STACK, &rLimit)
+	memoryLimit := uint64(task.setting.MemoryLimit<<20)*4 // 4 times
+	rLimit := &syscall.Rlimit{
+		Max: memoryLimit + 5 << 20, // more 5M
+		Cur: memoryLimit, // 4 times
+	}
+	setResourceLimit(syscall.RLIMIT_STACK, rLimit)
 	// The maximum size of the process's data segment (initialized data, uninitialized data, and heap)
-	setResourceLimit(syscall.RLIMIT_DATA, &rLimit)
+	setResourceLimit(syscall.RLIMIT_DATA, rLimit)
 	// The maximum size of the process's virtual memory (address space) in bytes
 	// will cause SIGSEGV
-	setResourceLimit(syscall.RLIMIT_AS, &rLimit)
+	setResourceLimit(syscall.RLIMIT_AS, rLimit)
 }
 
 func (task *RunningTask) allowSyscall() {

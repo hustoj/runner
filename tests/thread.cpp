@@ -2,9 +2,14 @@
 
 void new_thread()
 {
+    int total = 0;
     while (true)
     {
         std::thread *th = new std::thread(new_thread);
+        total++;
+        if (total > 10) {
+            break;
+        }
     }
 }
 

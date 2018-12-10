@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"hustoj/runner/runner"
-	"os"
 )
 
 func main() {
-	value, exist := os.LookupEnv("JUDGE_DEBUG")
-	if exist && value == "true" {
-		runner.Debug()
-	}
+	setting := runner.LoadConfig()
+	runner.InitLogger(setting.LogPath, setting.Verbose)
+
 	task := runner.RunningTask{}
-	task.Init(runner.LoadConfig())
+	task.Init(setting)
 	task.Run()
 
 	result := task.GetResult()

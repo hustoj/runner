@@ -14,7 +14,7 @@ int main(void) {
     for(i = 0; i < 100; i++) {
         c = (int *)malloc(1024 * 128);
         memset(c, 1024 * 128, 1);
-        sleep(1);
+//        sleep(1);
    }
     return 0;
 }

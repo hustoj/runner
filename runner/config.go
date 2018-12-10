@@ -1,31 +1,30 @@
 package runner
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
+	"github.com/koding/multiconfig"
 )
 
-type Setting struct {
-	TimeLimit   int `json:"time_limit"`
-	MemoryLimit int `json:"memory_limit"`
-	Language    int `json:"language"`
+type TaskConfig struct {
+	CPU    int `default:"3"`
+	Memory int `default:"256"`
+	Output int `default:"64"`
+	Stack  int `default:"8"`
+
+	Command     string `default:"./main"`
+	Language    int `default:"2"`
+
+	OneTimeCalls []string `default:"execve"`
+	AllowedCalls []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group"`
+	Verbose      bool     `default:"false"`
+	Result      int `default:"4"`
+
+	LogPath     string `default:"/var/log/runner/runner.log"`
 }
 
-func LoadConfig() *Setting {
-	contents, err := ioutil.ReadFile("case.conf")
-	if err != nil {
-		log.Panicln(fmt.Sprintf("read solution config failed: %v", err))
-	}
-	return ParseSettingContent(contents)
-}
+func LoadConfig() *TaskConfig {
+	m := multiconfig.NewWithPath("case.json")
+	setting := new(TaskConfig)
+	m.MustLoad(setting)
 
-func ParseSettingContent(content []byte) *Setting {
-	conf := &Setting{}
-	err := json.Unmarshal(content, conf)
-	if err != nil {
-		log.Panicf("parse case config failed : %v", err)
-	}
-
-	return conf
+	return setting
 }

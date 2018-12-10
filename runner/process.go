@@ -19,7 +19,7 @@ func (process *Process) Wait() {
 	if pid1 == 0 {
 		log.Panic("not found process")
 	}
-	checkPanic(err)
+	checkErr(err)
 }
 
 func (process *Process) Broken() bool {
@@ -46,12 +46,17 @@ func (process *Process) Exited() bool {
 }
 
 func (process *Process) GetTimeCost() int64 {
-	total := process.Rusage.Utime.Nano() + process.Rusage.Stime.Nano()
+	ru := process.Rusage
 
-	return total / 1000 / 1000
+	uSec := ru.Utime.Usec + ru.Stime.Usec
+
+	return uSec + (ru.Utime.Sec + ru.Stime.Sec) * 1e6
 }
 
 func (process *Process) Kill() {
+	if process.IsKilled {
+		return
+	}
 	log.Debugf("kill, %#v\n", process.Rusage)
 	process.IsKilled = true
 	syscall.Kill(process.Pid, syscall.SIGKILL)

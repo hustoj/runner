@@ -30,10 +30,18 @@ type Result struct {
 }
 
 func (res *Result) String() string {
-	return fmt.Sprintf("Result: %d, Time: %d, Memory: %dkb", res.RetCode, res.TimeCost, res.Memory)
+	return fmt.Sprintf("Result: %d, CPU: %d, Memory: %dkb", res.RetCode, res.TimeCost, res.Memory)
+}
+
+func (res *Result) isAccept() bool {
+	return res.RetCode == ACCEPT
 }
 
 func (res *Result) detectSignal(signal os.Signal) {
+	if signal == syscall.SIGUSR1 {
+		res.RetCode = RUNTIME_ERROR
+		return
+	}
 	if signal == syscall.SIGALRM || signal == syscall.SIGXCPU {
 		res.RetCode = TIME_LIMIT
 		return

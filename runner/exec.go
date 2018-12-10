@@ -6,44 +6,46 @@ import (
 )
 
 type RunningTask struct {
-	setting *Setting
+	setting *TaskConfig
 	process Process
 	Result  *Result
 	timeLimit int64
+	memoryLimit int64
 }
 
-func (task *RunningTask) Init(setting *Setting) {
-	task.Result = &Result{}
+func (task *RunningTask) Init(setting *TaskConfig) {
 	task.setting = setting
-	task.timeLimit = int64(setting.TimeLimit) * 1000
+	task.timeLimit = int64(setting.CPU) * 1e6
+	task.memoryLimit = int64(setting.Memory) * 1024
 
+	task.Result = &Result{}
 	task.Result.Init()
+
 	log.Debugf("load case config %v\n", task.setting)
 }
 
-func (task *RunningTask) execute() int {
+func (task *RunningTask) runProcess() int {
 	pid := fork()
 	if pid < 0 {
 		log.Panic("fork child failed")
 	}
 	if pid == 0 {
 		// enter child
-		task.resetIO()
 		task.limitResource()
-		task.allowSyscall()
+		task.redirectIO()
+
 		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
-		syscall.Exec("./Main", nil, nil)
+		syscall.Exec(task.setting.Command, nil, nil)
 	}
 	// return to parent
+	task.process.Pid = pid
+	log.Debugf("child pid is %d\n", pid)
 	return pid
 }
 
 func (task *RunningTask) Run() {
 	// execute task
-	pid := task.execute()
-
-	log.Debugf("child pid is %d", pid)
-	task.process.Pid = pid
+	task.runProcess()
 	task.trace()
 }
 
@@ -62,6 +64,7 @@ func (task *RunningTask) trace() {
 		Exit:    true,
 		prevRax: 0,
 	}
+	//tracer.InitSyscall()
 
 	for {
 		process.Wait()
@@ -73,7 +76,7 @@ func (task *RunningTask) trace() {
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infoln("Signal by: ", process.Status.StopSignal())
+			log.Infoln("-------- Signal by: ", process.Status.StopSignal())
 			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
@@ -81,22 +84,59 @@ func (task *RunningTask) trace() {
 			break
 		}
 
-		if tracer.detect() {
+		if tracer.checkSyscall() {
+			process.Kill()
 			break
 		}
 		// before next ptrace, get result, always pass
 		task.parseRunningInfo()
+		task.checkLimit()
+
 		process.Continue()
 	}
+	task.check()
+}
+
+func (task *RunningTask) check() {
+	if !task.Result.isAccept() {
+		return
+	}
+	if task.outOfMemory() {
+		task.Result.RetCode = MEMORY_LIMIT
+	}
+	if task.outOfTime() {
+		task.Result.RetCode = TIME_LIMIT
+	}
+}
+
+func (task *RunningTask) checkLimit() {
+	if task.outOfTime() {
+		task.Result.RetCode = TIME_LIMIT
+		log.Debugf("kill by time limit: current %d, limit %d\n", task.Result.TimeCost, task.timeLimit)
+		task.process.Kill()
+		return
+	}
+	if task.outOfMemory() {
+		task.Result.RetCode = MEMORY_LIMIT
+		log.Debugln("kill by memory limit:", task.Result.Memory, task.memoryLimit)
+		task.process.Kill()
+		return
+	}
+}
+
+func (task *RunningTask) outOfTime() bool {
+	log.Infof("current: %d, limit: %d", task.Result.TimeCost, task.timeLimit)
+	return task.Result.TimeCost > task.timeLimit
+}
+
+func (task *RunningTask) outOfMemory() bool {
+	// checkSyscall memory is over limit
+	return task.Result.Memory > task.memoryLimit
 }
 
 func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
-	if task.Result.TimeCost > task.timeLimit {
-		task.Result.RetCode = TIME_LIMIT
-		log.Debugf("kill by time limit: current %d, limit %d\n", task.Result.TimeCost, task.setting.TimeLimit)
-		task.process.Kill()
-	}
+	log.Debugf("current time cost: %dus(1e-6s)\n", task.Result.TimeCost)
 }
 
 func (task *RunningTask) refreshMemory() {
@@ -108,13 +148,6 @@ func (task *RunningTask) refreshMemory() {
 	if memory > task.Result.Memory {
 		task.Result.Memory = memory
 	}
-
-	// detect memory is over limit
-	if task.Result.Memory > int64(task.setting.MemoryLimit)*1024 {
-		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugln("kill by memory limit:", task.Result.Memory, task.setting.MemoryLimit)
-		task.process.Kill()
-	}
 }
 
 func (task *RunningTask) parseRunningInfo() {
@@ -122,15 +155,15 @@ func (task *RunningTask) parseRunningInfo() {
 	task.refreshMemory()
 }
 
-func (task *RunningTask) resetIO() {
+func (task *RunningTask) redirectIO() {
 	dupFileForRead("user.in", os.Stdin)
 	dupFileForWrite("user.out", os.Stdout)
 	dupFileForWrite("user.err", os.Stderr)
 }
 
 func (task *RunningTask) limitResource() {
-	// max execute time
-	timeLimit := uint64(task.setting.TimeLimit)
+	// max runProcess time
+	timeLimit := uint64(task.setting.CPU)
 	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 1, Cur: timeLimit})
 
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit), 0, 0)
@@ -144,7 +177,7 @@ func (task *RunningTask) limitResource() {
 	// max memory size
 	// The maximum size of the process stack, in bytes
 	// will cause SIGSEGV
-	memoryLimit := uint64(task.setting.MemoryLimit<<20)*4 // 4 times
+	memoryLimit := uint64(task.memoryLimit<<10)*4 // 4 times
 	rLimit := &syscall.Rlimit{
 		Max: memoryLimit + 5 << 20, // more 5M
 		Cur: memoryLimit, // 4 times
@@ -158,10 +191,7 @@ func (task *RunningTask) limitResource() {
 }
 
 func (task *RunningTask) allowSyscall() {
-	//scs := []string{"ptrace", "execve", "read", "write", "brk", "fstat",
-	//	"uname", "mmap", "arch_prctl", "exit_group", "nanosleep", "readlink",
-	//	"access"}
-	//allowSyscall(scs)
+
 }
 
 func setResourceLimit(code int, rLimit *syscall.Rlimit) {

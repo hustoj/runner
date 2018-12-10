@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"syscall"
+	"time"
 )
 
 func fileDup(f1 *os.File, f2 *os.File) {
@@ -12,17 +13,17 @@ func fileDup(f1 *os.File, f2 *os.File) {
 
 func dupFileForRead(filename string, file *os.File) {
 	fin, err := os.OpenFile(filename, os.O_RDONLY|os.O_CREATE, 0666)
-	checkFatal(err)
+	checkErr(err)
 	fileDup(fin, file)
 }
 
 func dupFileForWrite(filename string, file *os.File) {
 	fout, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	checkFatal(err)
+	checkErr(err)
 	fileDup(fout, file)
 }
 
-func checkFatal(err error) {
+func checkErr(err error) {
 	if err != nil {
 		panic(err)
 	}
@@ -30,10 +31,14 @@ func checkFatal(err error) {
 
 func fork() int {
 	r1, _, errno := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0)
-	if errno != 0 {
+	if errno != 0 || r1 < 0{
 		log.Panic("fork failed", errno)
 	}
 	return int(r1)
+}
+
+func getWallDuration(from time.Time) int64 {
+	return int64(time.Now().Nanosecond() - from.Nanosecond())
 }
 
 func ChangeRunningUser(user int) {

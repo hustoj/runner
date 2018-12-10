@@ -3,21 +3,11 @@ package main
 import (
 	"fmt"
 	"hustoj/runner/runner"
-	"os"
-	"strconv"
 )
 
 func main() {
-	runner.Debug()
-	setting := &runner.Setting{}
-	if len(os.Args) < 3 {
-		panic("argument should be time, memory, retcode")
-	}
-
-	setting.TimeLimit = parseArg(1)
-	setting.MemoryLimit = parseArg(2)
-
-	retCode := parseArg(3)
+	setting := runner.LoadConfig()
+	runner.InitLogger(setting.LogPath, setting.Verbose)
 
 	task := runner.RunningTask{}
 	task.Init(setting)
@@ -25,15 +15,8 @@ func main() {
 
 	result := task.GetResult()
 
-	if result.RetCode != retCode {
-		fmt.Printf("retcode not match, expect: %d, actual: %d\n", retCode, result.RetCode)
+	if result.RetCode != setting.Result {
+		fmt.Printf("retcode not match, expect: %d, actual: %d\n", setting.Result, result.RetCode)
 	}
 }
 
-func parseArg(index int) int {
-	ret, err := strconv.Atoi(os.Args[index])
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}

@@ -64,7 +64,8 @@ func (task *RunningTask) trace() {
 		Exit:    true,
 		prevRax: 0,
 	}
-	//tracer.InitSyscall()
+
+	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &task.setting.AllowedCalls))
 
 	for {
 		process.Wait()
@@ -86,6 +87,7 @@ func (task *RunningTask) trace() {
 
 		if tracer.checkSyscall() {
 			process.Kill()
+			task.Result.RetCode = RUNTIME_ERROR
 			break
 		}
 		// before next ptrace, get result, always pass

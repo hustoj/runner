@@ -8,6 +8,11 @@ type TracerDetect struct {
 	Exit    bool
 	prevRax uint64
 	Pid     int
+	callPolicy *CallPolicy
+}
+
+func (tracer *TracerDetect) setCallPolicy(policy *CallPolicy) {
+	tracer.callPolicy = policy
 }
 
 func (tracer *TracerDetect) checkSyscall() bool {
@@ -27,7 +32,14 @@ func (tracer *TracerDetect) checkSyscall() bool {
 		}
 	} else {
 		log.Debugf(">>Name %16v", getName(regs.Orig_rax))
-		// todo:here check
+
+		if !tracer.callPolicy.CheckID(regs.Orig_rax) {
+			log.Infof("not allowd syscall %d: %16v ", regs.Orig_rax, getName(regs.Orig_rax))
+			return true
+		}
+		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
+			log.Info(getName(regs.Orig_rax))
+		}
 	}
 	tracer.prevRax = regs.Orig_rax
 	if tracer.prevRax == syscall.SYS_EXIT_GROUP {

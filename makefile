@@ -29,12 +29,12 @@ case-mle2:
 case-mle3:
 	gcc ./tests/mle3.c -o bin/mle3 -static
 	@rm bin/main;ln -s mle3 bin/main
-	@cd bin;./test -cpu=20 -memory=4 -result=8
+	@cd bin;./test -cpu=20 -memory=4 -result=10
 
 case-tle:
 	gcc ./tests/tle.c -o bin/tle -static
 	@rm bin/main;ln -s tle bin/main
-	@cd bin;./test -cpu=1 -memory=2 -result=7
+	@cd bin;./test -cpu=1 -memory=2 -result=10
 
 case-tle2:
 	gcc ./tests/tle2.c -o bin/tle2 -static

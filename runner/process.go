@@ -34,6 +34,10 @@ func (process *Process) Trapped() bool {
 	return process.Status.StopSignal() == syscall.SIGTRAP
 }
 
+func (process *Process) Memory() int64 {
+	return process.Rusage.Maxrss
+}
+
 func (process *Process) Exited() bool {
 	if process.IsKilled {
 		return true

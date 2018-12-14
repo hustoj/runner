@@ -172,8 +172,8 @@ func (task *RunningTask) limitResource() {
 
 	// max file output size
 	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
-		Max: 256 << 10, // 256kb
-		Cur: 128 << 10, // 128kb
+		Max: uint64(task.setting.Output << 21),
+		Cur: uint64(task.setting.Output << 20),
 	})
 
 	// max memory size

@@ -1,52 +1,28 @@
+MAKEFLAGS += -s
+
 default:
-	go build -o bin/runner cmd/runner.go
+	go build -o bin/runner ./cmd/runner
+
+compiler:
+	go build -o bin/compile ./cmd/compile
 
 build-docker:
-	go build -o docker/runner cmd/runner.go
+	go build -o docker/runner ./cmd/runner
 	docker build -t runner:v1 ./docker
 
-test: prepare case-general case-mle1 case-mle2 \
-	case-mle3 case-tle case-tle2 case-fork case-thread
-
 prepare:
-	go build -o bin/test cmd/test.go
+	go build -o bin/test ./cmd/test
 
-case-general:
-	gcc ./tests/main.c -o bin/general -static
-	@rm bin/main;ln -s general bin/main
-	@cd bin;./test -cpu=1 -memory=2 -result=4
-
-case-mle1:
-	gcc ./tests/mle.c -o bin/mle -static
-	@rm bin/main;ln -s mle bin/main
-	@cd bin;./test -cpu=10 -memory=4 -result=8
-
-case-mle2:
-	gcc ./tests/mle2.c -o bin/mle2 -static
-	@rm bin/main;ln -s mle2 bin/main
-	@cd bin;./test -cpu=10 -memory=4 -result=8
-
-case-mle3:
-	gcc ./tests/mle3.c -o bin/mle3 -static
-	@rm bin/main;ln -s mle3 bin/main
-	@cd bin;./test -cpu=20 -memory=4 -result=10
-
-case-tle:
-	gcc ./tests/tle.c -o bin/tle -static
-	@rm bin/main;ln -s tle bin/main
-	@cd bin;./test -cpu=1 -memory=2 -result=10
-
-case-tle2:
-	gcc ./tests/tle2.c -o bin/tle2 -static
-	@rm bin/main;ln -s tle2 bin/main
-	@cd bin;./test -cpu=1 -memory=2 -result=7
-
-case-fork:
-	gcc ./tests/fork.c -o bin/fork -static
-	@rm bin/main;ln -s fork bin/main
-	@cd bin;./test -cpu=10 -memory=10 -result=10
-
-case-thread:
-	g++ tests/thread.cpp -o bin/thread -static -std=gnu++11 -lpthread
-	@rm bin/main;ln -s thread bin/main
-	@cd bin;./test -cpu=10 -memory=10 -result=10
+testall: prepare
+	cd tests/general;make
+	cd tests/fork;make
+	cd tests/mle;make
+	cd tests/mle2;make
+	cd tests/mle21;make
+	cd tests/segmentfault;make
+	cd tests/socket;make
+	cd tests/stack;make
+	cd tests/thread;make
+	cd tests/tle;make
+	cd tests/tle2;make
+	cd tests/zero;make

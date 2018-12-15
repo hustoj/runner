@@ -9,7 +9,6 @@ int main() {
     for(i = 0; i < 100; i++) {
         c = (int *)malloc(1024 * 1024);
         memset(c, 1024 * 1024, 1);
-        sleep(1);
    }
     return 0;
 }

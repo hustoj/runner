@@ -6,10 +6,10 @@ import (
 )
 
 type RunningTask struct {
-	setting *TaskConfig
-	process Process
-	Result  *Result
-	timeLimit int64
+	setting     *TaskConfig
+	process     Process
+	Result      *Result
+	timeLimit   int64
 	memoryLimit int64
 }
 
@@ -78,9 +78,9 @@ func (task *RunningTask) trace() {
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infoln("-------- Signal by: ", process.Status.Signal(),  process.Status.StopSignal())
+			log.Infoln("-------- Signal by: ", process.Status.Signal())
 			task.parseRunningInfo()
-			task.Result.detectSignal(process.Status.StopSignal())
+			task.Result.detectSignal(process.Status.Signal())
 			// send kill to process
 			log.Debugf("Process broken, will kill process\n")
 			process.Kill()
@@ -199,10 +199,6 @@ func (task *RunningTask) limitResource() {
 	// The maximum size of the process's virtual memory (address space) in bytes
 	// will cause SIGSEGV
 	setResourceLimit(syscall.RLIMIT_AS, rLimit)
-}
-
-func (task *RunningTask) allowSyscall() {
-
 }
 
 func setResourceLimit(code int, rLimit *syscall.Rlimit) {

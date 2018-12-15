@@ -19,6 +19,7 @@ testall: prepare
 	cd tests/mle;make
 	cd tests/mle2;make
 	cd tests/mle21;make
+	cd tests/mle3;make
 	cd tests/segmentfault;make
 	cd tests/socket;make
 	cd tests/stack;make
@@ -26,3 +27,4 @@ testall: prepare
 	cd tests/tle;make
 	cd tests/tle2;make
 	cd tests/zero;make
+	cd tests/ole;make

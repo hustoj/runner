@@ -1,7 +1,7 @@
 {
   "verbose": true,
   "CPU": 1,
-  "Memory": 2,
+  "Memory": 10,
   "Result": 9,
   "Output": 1
 }

@@ -21,7 +21,8 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 	task.Result = &Result{}
 	task.Result.Init()
 
-	log.Debugf("load case config %v\n", task.setting)
+	log.Debugf("load case config %#v\n", task.setting)
+	log.Debugf("Time limit: %d, Memory limit: %d", task.timeLimit, task.memoryLimit)
 }
 
 func (task *RunningTask) runProcess() int {
@@ -72,20 +73,22 @@ func (task *RunningTask) trace() {
 
 		if process.Exited() {
 			log.Infoln("program exited!", process.Status.StopSignal())
-			task.refreshTimeCost()
+			task.parseRunningInfo()
 			break
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infoln("-------- Signal by: ", process.Status.StopSignal())
+			log.Infoln("-------- Signal by: ", process.Status.Signal(),  process.Status.StopSignal())
 			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
+			log.Debugf("Process broken, will kill process\n")
 			process.Kill()
 			break
 		}
 
 		if tracer.checkSyscall() {
+			log.Debugf("------- check syscall failed")
 			process.Kill()
 			task.Result.RetCode = RUNTIME_ERROR
 			break
@@ -120,19 +123,18 @@ func (task *RunningTask) checkLimit() {
 	}
 	if task.outOfMemory() {
 		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugln("kill by memory limit:", task.Result.Memory, task.memoryLimit)
+		log.Debugf("kill by memory limit: current %d, limit %d\n", task.Result.Memory, task.memoryLimit)
 		task.process.Kill()
 		return
 	}
 }
 
 func (task *RunningTask) outOfTime() bool {
-	log.Infof("current: %d, limit: %d", task.Result.TimeCost, task.timeLimit)
 	return task.Result.TimeCost > task.timeLimit
 }
 
 func (task *RunningTask) outOfMemory() bool {
-	// checkSyscall memory is over limit
+	// check memory is over limit
 	return task.Result.Memory > task.memoryLimit
 }
 
@@ -144,9 +146,16 @@ func (task *RunningTask) refreshTimeCost() {
 func (task *RunningTask) refreshMemory() {
 	memory, err := GetProcMemory(task.process.Pid)
 	if err != nil {
-		log.Infoln("Get memory failed:", err)
-		return
+		log.Infoln("Get status memory failed:", err)
+	} else {
+		log.Debugf("peak memory is: %d\n", memory)
+		if memory > task.Result.Memory {
+			task.Result.Memory = memory
+		}
 	}
+
+	memory = task.process.Memory()
+	log.Debugf("rusage memory is: %d\n", memory)
 	if memory > task.Result.Memory {
 		task.Result.Memory = memory
 	}
@@ -168,7 +177,7 @@ func (task *RunningTask) limitResource() {
 	timeLimit := uint64(task.setting.CPU)
 	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 1, Cur: timeLimit})
 
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit), 0, 0)
+	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit + 5), 0, 0)
 
 	// max file output size
 	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{

@@ -4,26 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"syscall"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
+	"hustoj/runner/runner"
 )
 
-const (
-	RESULT_CE = "CE"
-	RESULT_OK = "OK"
-	RESULT_TL = "TL"
-	RESULT_ML = "ML"
-	RESULT_OL = "OL"
-	RESULT_RE = "RE"
-	RESULT_RF = "RF"
-)
+var log *logrus.Logger
 
 type RunResult struct {
 	Success bool   `json:"success"`
-	Result  string `json:"result"`
-	Memory  int    `json:"mem"`
-	Time    int    `json:"time"`
 }
 func setrLimits(cpu, memory, output, stack uint64) {
 	syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu})
@@ -33,14 +25,30 @@ func setrLimits(cpu, memory, output, stack uint64) {
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(cpu*3+2), 0, 0)
 }
 
+func doCompile(cfg *CompileConfig) {
+	setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack))
+	runner.DupFileForWrite("compile.err", os.Stderr)
+	runner.DupFileForWrite("compile.out", os.Stdout)
+	binary, lookErr := exec.LookPath(cfg.Command)
+	if lookErr != nil {
+		panic(lookErr)
+	}
+
+	args := []string{binary, "main.c", "-o", "main", "-O2", "-fmax-errors=10", "-Wall", "--static", "-lm", "--std=c99"}
+	env := os.Environ()
+	err := syscall.Exec(binary, args, env)
+	if err != nil {
+		fmt.Printf("exec failed: %s\n", err)
+	}
+}
+
 func runProcessC(cfg *CompileConfig) int {
 	pid := fork()
 	if pid < 0 {
 		panic(errors.New("fork error"))
 	}
 	if pid == 0 {
-		setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack))
-		syscall.Exec(cfg.Command, []string{cfg.Command, "-o", "main", "-O2", "-fmax-errors=10", "-Wall", "-lm", "--static", "--std=c99", "main.c"}, []string{"PATH=/usr/bin/"})
+		doCompile(cfg)
 	}
 	return pid
 }
@@ -50,36 +58,27 @@ func fork() int {
 	return int(r1)
 }
 
-func runner(cfg *CompileConfig) *RunResult {
+func handle(cfg *CompileConfig) *RunResult {
 	var status syscall.WaitStatus
 	var rusage syscall.Rusage
 	pid := runProcessC(cfg)
 	log.Info("Child Pid is: ", pid)
 
-	result := RunResult{Success: true, Result: RESULT_OK, Time: 0, Memory: 0}
+	result := RunResult{Success: true}
 
 	pid, _ = syscall.Wait4(pid, &status, 0, &rusage)
 	if status != 0 {
 		result.Success = false
-		result.Result = RESULT_CE
 	}
 	return &result
 }
 
 func main() {
 	m := loadConfig()
-	configLogger(m.Verbose)
-	r := runner(m)
+	fmt.Printf("%#v\n", m)
+	log = runner.InitLogger(m.LogPath, m.Verbose)
+	//doCompile(m)
+	r := handle(m)
 	res, _ := json.Marshal(r)
 	fmt.Println(string(res))
-}
-
-func configLogger(debug bool) {
-	log.SetFormatter(&log.TextFormatter{
-		DisableColors: true,
-		FullTimestamp: true,
-	})
-	if !debug {
-		log.SetLevel(log.WarnLevel)
-	}
 }

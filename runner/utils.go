@@ -11,13 +11,13 @@ func fileDup(f1 *os.File, f2 *os.File) {
 	f1.Close()
 }
 
-func dupFileForRead(filename string, file *os.File) {
+func DupFileForRead(filename string, file *os.File) {
 	fin, err := os.OpenFile(filename, os.O_RDONLY|os.O_CREATE, 0666)
 	checkErr(err)
 	fileDup(fin, file)
 }
 
-func dupFileForWrite(filename string, file *os.File) {
+func DupFileForWrite(filename string, file *os.File) {
 	fout, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	checkErr(err)
 	fileDup(fout, file)

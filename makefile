@@ -6,9 +6,13 @@ default:
 compiler:
 	go build -o bin/compile ./cmd/compile
 
-build-docker:
-	go build -o docker/runner ./cmd/runner
-	docker build -t runner:v1 ./docker
+build-docker-runner:
+	go build -o docker/runner/runner ./cmd/runner
+	docker build -t runner:v1 ./docker/runner
+
+build-docker-compiler:
+	go build -o docker/compiler/compiler ./cmd/compiler
+	docker build -t compiler:v1 ./docker/compiler
 
 prepare:
 	go build -o bin/test ./cmd/test

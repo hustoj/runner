@@ -167,9 +167,9 @@ func (task *RunningTask) parseRunningInfo() {
 }
 
 func (task *RunningTask) redirectIO() {
-	dupFileForRead("user.in", os.Stdin)
-	dupFileForWrite("user.out", os.Stdout)
-	dupFileForWrite("user.err", os.Stderr)
+	DupFileForRead("user.in", os.Stdin)
+	DupFileForWrite("user.out", os.Stdout)
+	DupFileForWrite("user.err", os.Stderr)
 }
 
 func (task *RunningTask) limitResource() {

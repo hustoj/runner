@@ -9,12 +9,13 @@ type CompileConfig struct {
 	Memory  int    `default:"128"`
 	Output  int    `default:"16"`
 	Stack   int    `default:"8"`
-	Command string `default:"/usr/bin/gcc"`
+	Command string `default:"gcc"`
 	Verbose bool   `default:"false"`
+	LogPath string `default:"/var/log/runner/compiler.log"`
 }
 
 func loadConfig() *CompileConfig {
-	m := multiconfig.New()
+	m := multiconfig.NewWithPath("compiler.json")
 	compileConfig := new(CompileConfig)
 	m.MustLoad(compileConfig)
 	return compileConfig

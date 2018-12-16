@@ -7,7 +7,7 @@ import (
 
 var log *logrus.Logger
 
-func InitLogger(logPath string, debug bool) {
+func InitLogger(logPath string, debug bool) *logrus.Logger {
 	log = logrus.New()
 
 	if len(logPath) > 0 {
@@ -30,4 +30,6 @@ func InitLogger(logPath string, debug bool) {
 	} else {
 		log.SetLevel(logrus.DebugLevel)
 	}
+
+	return log
 }

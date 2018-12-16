@@ -1,0 +1,5 @@
+{
+	"command": "fpc",
+	"verbose": true,
+	"args": "main.pas -Co -Cr -Ct -Ci -Xt -Xi -O2 -Tlinux -omain"
+}

@@ -15,8 +15,9 @@ import (
 var log *logrus.Logger
 
 type RunResult struct {
-	Success bool   `json:"success"`
+	Success bool `json:"success"`
 }
+
 func setrLimits(cpu, memory, output, stack uint64) {
 	syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu})
 	syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Max: output << 20, Cur: output << 20})
@@ -34,12 +35,17 @@ func doCompile(cfg *CompileConfig) {
 		panic(lookErr)
 	}
 
-	args := []string{binary, "main.c", "-o", "main", "-O2", "-fmax-errors=10", "-Wall", "--static", "-lm", "--std=c99"}
 	env := os.Environ()
+	args := makeArgs(binary, cfg)
 	err := syscall.Exec(binary, args, env)
 	if err != nil {
 		fmt.Printf("exec failed: %s\n", err)
 	}
+}
+
+func makeArgs(binary string, cfg *CompileConfig) []string {
+	args := cfg.GetArgs()
+	return append([]string{binary}, args...)
 }
 
 func runProcessC(cfg *CompileConfig) int {

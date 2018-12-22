@@ -1,4 +1,6 @@
 FROM ubuntu
 COPY compiler /usr/bin/
-VOLUME /home/judger
+VOLUME /data
 VOLUME /var/log/runner
+WORKDIR /data
+ENTRYPOINT ["compiler"]

@@ -1,4 +1,6 @@
 FROM ubuntu
 COPY runner /usr/bin/
-VOLUME /home/judger
+VOLUME /data
 VOLUME /var/log/runner
+WORKDIR /data
+ENTRYPOINT ["runner"]

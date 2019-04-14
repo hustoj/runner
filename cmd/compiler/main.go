@@ -83,7 +83,6 @@ func main() {
 	m := loadConfig()
 	fmt.Printf("%#v\n", m)
 	log = runner.InitLogger(m.LogPath, m.Verbose)
-	//doCompile(m)
 	r := handle(m)
 	res, _ := json.Marshal(r)
 	fmt.Println(string(res))

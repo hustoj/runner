@@ -21,7 +21,7 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 	task.Result = &Result{}
 	task.Result.Init()
 
-	log.Debugf("load case config %#v\n", task.setting)
+	log.Debugf("load case config %#v", task.setting)
 	log.Debugf("Time limit: %d, Memory limit: %d", task.timeLimit, task.memoryLimit)
 }
 
@@ -40,7 +40,7 @@ func (task *RunningTask) runProcess() int {
 	}
 	// return to parent
 	task.process.Pid = pid
-	log.Debugf("child pid is %d\n", pid)
+	log.Debugf("child pid is %d", pid)
 	return pid
 }
 
@@ -82,7 +82,7 @@ func (task *RunningTask) trace() {
 			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.Signal())
 			// send kill to process
-			log.Debugf("Process broken, will kill process\n")
+			log.Debugf("Process broken, will kill process")
 			process.Kill()
 			break
 		}
@@ -117,13 +117,13 @@ func (task *RunningTask) check() {
 func (task *RunningTask) checkLimit() {
 	if task.outOfTime() {
 		task.Result.RetCode = TIME_LIMIT
-		log.Debugf("kill by time limit: current %d, limit %d\n", task.Result.TimeCost, task.timeLimit)
+		log.Debugf("kill by time limit: current %d, limit %d", task.Result.TimeCost, task.timeLimit)
 		task.process.Kill()
 		return
 	}
 	if task.outOfMemory() {
 		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugf("kill by memory limit: current %d, limit %d\n", task.Result.Memory, task.memoryLimit)
+		log.Debugf("kill by memory limit: current %d, limit %d", task.Result.Memory, task.memoryLimit)
 		task.process.Kill()
 		return
 	}
@@ -140,7 +140,7 @@ func (task *RunningTask) outOfMemory() bool {
 
 func (task *RunningTask) refreshTimeCost() {
 	task.Result.TimeCost = task.process.GetTimeCost()
-	log.Debugf("current time cost: %dus(1e-6s)\n", task.Result.TimeCost)
+	log.Debugf("current time cost: %dus(1e-6s)", task.Result.TimeCost)
 }
 
 func (task *RunningTask) refreshMemory() {
@@ -148,14 +148,14 @@ func (task *RunningTask) refreshMemory() {
 	if err != nil {
 		log.Infoln("Get status memory failed:", err)
 	} else {
-		log.Debugf("peak memory is: %d\n", memory)
+		log.Debugf("peak memory is: %d", memory)
 		if memory > task.Result.Memory {
 			task.Result.Memory = memory
 		}
 	}
 
 	memory = task.process.Memory()
-	log.Debugf("rusage memory is: %d\n", memory)
+	log.Debugf("rusage memory is: %d", memory)
 	if memory > task.Result.Memory {
 		task.Result.Memory = memory
 	}

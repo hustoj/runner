@@ -43,7 +43,7 @@ func (process *Process) Exited() bool {
 		return true
 	}
 	if process.Status.Exited() {
-		log.Debugf("Exited: %#v\n", process.Rusage)
+		log.Debugf("Exited: %#v", process.Rusage)
 		return true
 	}
 	return false
@@ -61,7 +61,7 @@ func (process *Process) Kill() {
 	if process.IsKilled {
 		return
 	}
-	log.Debugf("kill, %#v\n", process.Rusage)
+	log.Debugf("kill, %#v", process.Rusage)
 	process.IsKilled = true
 	syscall.Kill(process.Pid, syscall.SIGKILL)
 }
@@ -72,6 +72,6 @@ func (process *Process) Continue() {
 	}
 	err := syscall.PtraceSyscall(process.Pid, 0)
 	if err != nil {
-		log.Debugf("PtraceSyscall: err %v\n", err)
+		log.Debugf("PtraceSyscall: err %v", err)
 	}
 }

@@ -44,6 +44,6 @@ func getWallDuration(from time.Time) int64 {
 func ChangeRunningUser(user int) {
 	err := syscall.Setuid(user)
 	if err != nil {
-		log.Panicf("set running uid failed %v\n", err)
+		log.Panicf("set running uid failed %v", err)
 	}
 }

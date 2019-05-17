@@ -23,7 +23,7 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 	task.Result.Init()
 
 	log.Debugf("load case config %#v", task.setting)
-	log.Debugf("Time limit: %d, Memory limit: %d", task.timeLimit, task.memoryLimit)
+	log.Debugf("Time limit: %d, PeakMemory limit: %d", task.timeLimit, task.memoryLimit)
 }
 
 func (task *RunningTask) runProcess() int {
@@ -103,7 +103,11 @@ func (task *RunningTask) trace() {
 		task.parseRunningInfo()
 		task.checkLimit()
 
-		process.Continue()
+		if !process.Continue() {
+			log.Infoln("Program not alive! break")
+			break
+		}
+
 	}
 	task.check()
 }
@@ -129,7 +133,7 @@ func (task *RunningTask) checkLimit() {
 	}
 	if task.outOfMemory() {
 		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugf("kill by memory limit: current %d, limit %d", task.Result.Memory, task.memoryLimit)
+		log.Debugf("kill by memory limit: current %d, limit %d", task.Result.PeakMemory, task.memoryLimit)
 		task.process.Kill()
 		return
 	}
@@ -141,7 +145,7 @@ func (task *RunningTask) outOfTime() bool {
 
 func (task *RunningTask) outOfMemory() bool {
 	// check memory is over limit
-	return task.Result.Memory > task.memoryLimit
+	return (task.Result.PeakMemory > task.memoryLimit) && (task.Result.RusageMemory > task.memoryLimit)
 }
 
 func (task *RunningTask) refreshTimeCost() {
@@ -155,15 +159,15 @@ func (task *RunningTask) refreshMemory() {
 		log.Infoln("Get status memory failed:", err)
 	} else {
 		log.Debugf("peak memory is: %d", memory)
-		if memory > task.Result.Memory {
-			task.Result.Memory = memory
+		if memory > task.Result.PeakMemory {
+			task.Result.PeakMemory = memory
 		}
 	}
 
 	memory = task.process.Memory()
 	log.Debugf("rusage memory is: %d", memory)
-	if memory > task.Result.Memory {
-		task.Result.Memory = memory
+	if memory > task.Result.RusageMemory {
+		task.Result.RusageMemory = memory
 	}
 }
 

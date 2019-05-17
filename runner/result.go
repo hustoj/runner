@@ -24,13 +24,14 @@ const (
 )
 
 type Result struct {
-	RetCode  int	`json:"status"`
-	Memory   int64	`json:"memory"`
-	TimeCost int64	`json:"time"`
+	RetCode    int   `json:"status"`
+	PeakMemory int64 `json:"peak_memory"`
+	RusageMemory int64 `json:"rusage_memory"`
+	TimeCost   int64 `json:"time"`
 }
 
 func (res *Result) String() string {
-	return fmt.Sprintf("Result: %d, CPU: %d, Memory: %dkb", res.RetCode, res.TimeCost, res.Memory)
+	return fmt.Sprintf("Result: %d, CPU: %d, PeakMemory: %dkb", res.RetCode, res.TimeCost, res.PeakMemory)
 }
 
 func (res *Result) isAccept() bool {
@@ -57,6 +58,6 @@ func (res *Result) detectSignal(signal os.Signal) {
 
 func (res *Result) Init() {
 	res.TimeCost = 0
-	res.Memory = 0
+	res.PeakMemory = 0
 	res.RetCode = ACCEPT
 }

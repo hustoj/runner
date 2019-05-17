@@ -5,7 +5,7 @@ import "testing"
 func Test_parseSize(t *testing.T) {
 	ret, _ := parseSize("   145164 kB")
 	if ret != 145164 {
-		t.Errorf("Memory parse failed, %d", ret)
+		t.Errorf("PeakMemory parse failed, %d", ret)
 	}
 }
 
@@ -32,6 +32,6 @@ VmRSS:      5640 kB
 `
 	ret, _ := parseMemory(fileContent)
 	if ret != 145164 {
-		t.Errorf("Memory parse failed, %d", ret)
+		t.Errorf("PeakMemory parse failed, %d", ret)
 	}
 }

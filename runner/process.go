@@ -66,12 +66,14 @@ func (process *Process) Kill() {
 	syscall.Kill(process.Pid, syscall.SIGKILL)
 }
 
-func (process *Process) Continue() {
+func (process *Process) Continue() bool {
 	if process.IsKilled {
-		return
+		return false
 	}
 	err := syscall.PtraceSyscall(process.Pid, 0)
 	if err != nil {
-		log.Debugf("PtraceSyscall: err %v", err)
+		log.Infof("PtraceSyscall: err %v", err)
+		return false
 	}
+	return true
 }

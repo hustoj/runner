@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -36,7 +37,12 @@ func (task *RunningTask) runProcess() int {
 		task.redirectIO()
 
 		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
-		syscall.Exec(task.setting.Command, nil, nil)
+
+		env := os.Environ()
+		err := syscall.Exec(task.setting.GetCommand(), task.setting.GetArgs(), env)
+		if err != nil {
+			panic(fmt.Sprintf("Exec failed: %v", err))
+		}
 	}
 	// return to parent
 	task.process.Pid = pid
@@ -177,7 +183,7 @@ func (task *RunningTask) limitResource() {
 	timeLimit := uint64(task.setting.CPU)
 	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 1, Cur: timeLimit})
 
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit + 5), 0, 0)
+	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit+5), 0, 0)
 
 	// max file output size
 	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
@@ -188,10 +194,10 @@ func (task *RunningTask) limitResource() {
 	// max memory size
 	// The maximum size of the process stack, in bytes
 	// will cause SIGSEGV
-	memoryLimit := uint64(task.memoryLimit<<10)*4 // 4 times
+	memoryLimit := uint64(task.memoryLimit<<10) * 4 // 4 times
 	rLimit := &syscall.Rlimit{
-		Max: memoryLimit + 5 << 20, // more 5M
-		Cur: memoryLimit, // 4 times
+		Max: memoryLimit + 5<<20, // more 5M
+		Cur: memoryLimit,         // 4 times
 	}
 	setResourceLimit(syscall.RLIMIT_STACK, rLimit)
 	// The maximum size of the process's data segment (initialized data, uninitialized data, and heap)

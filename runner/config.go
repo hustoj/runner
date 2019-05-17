@@ -1,8 +1,8 @@
 package runner
 
-
 import (
 	"github.com/koding/multiconfig"
+	"strings"
 )
 
 type TaskConfig struct {
@@ -19,7 +19,24 @@ type TaskConfig struct {
 	Verbose      bool     `default:"false"`
 	Result       int      `default:"4"`
 
-	LogPath string `default:"/var/log/runner/runner.log"`
+	LogPath  string `default:"/var/log/runner/runner.log"`
+	commands []string
+}
+
+func (tc *TaskConfig) GetCommand() string {
+	tc.parseCommand()
+	return tc.commands[0]
+}
+
+func (tc *TaskConfig)parseCommand()  {
+	if len(tc.commands) == 0 {
+		tc.commands = strings.Split(tc.Command, " ")
+	}
+}
+
+func (tc *TaskConfig) GetArgs() []string {
+	tc.parseCommand()
+	return tc.commands
 }
 
 func LoadConfig() *TaskConfig {

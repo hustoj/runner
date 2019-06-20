@@ -4,7 +4,7 @@ default:
 	go build -o bin/runner ./cmd/runner
 
 compiler:
-	go build -o bin/compile ./cmd/compile
+	go build -o bin/compile ./cmd/compiler
 
 build-docker-runner:
 	go build -o docker/runner/runner ./cmd/runner

@@ -41,7 +41,7 @@ func (tc *TaskConfig) GetArgs() []string {
 
 func LoadConfig() *TaskConfig {
 	m := multiconfig.NewWithPath("case.json")
-	setting := new(TaskConfig)
+	setting = new(TaskConfig)
 	m.MustLoad(setting)
 
 	return setting

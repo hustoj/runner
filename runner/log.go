@@ -5,8 +5,6 @@ import (
 	"os"
 )
 
-var log *logrus.Logger
-
 func InitLogger(logPath string, debug bool) *logrus.Logger {
 	log = logrus.New()
 

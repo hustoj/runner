@@ -8,7 +8,7 @@ import (
 
 type RunningTask struct {
 	setting     *TaskConfig
-	process     Process
+	process     *Process
 	Result      *Result
 	timeLimit   int64
 	memoryLimit int64
@@ -45,6 +45,7 @@ func (task *RunningTask) runProcess() int {
 		}
 	}
 	// return to parent
+	task.process = new(Process)
 	task.process.Pid = pid
 	log.Debugf("child pid is %d", pid)
 	return pid
@@ -63,7 +64,7 @@ func (task *RunningTask) GetResult() *Result {
 }
 
 func (task *RunningTask) trace() {
-	process := &task.process
+	process := task.process
 	process.IsKilled = false
 
 	tracer := TracerDetect{

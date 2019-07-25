@@ -85,9 +85,9 @@ func (task *RunningTask) trace() {
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infoln("-------- Signal by: ", process.Status.Signal())
+			log.Infoln("-------- Signal by: ", process.Status.StopSignal())
 			task.parseRunningInfo()
-			task.Result.detectSignal(process.Status.Signal())
+			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
 			log.Debugf("Process broken, will kill process")
 			process.Kill()

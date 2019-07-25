@@ -39,17 +39,17 @@ func (res *Result) isAccept() bool {
 }
 
 func (res *Result) detectSignal(signal os.Signal) {
-	log.Debugf("Detect signal %v", signal)
-	if signal == syscall.SIGUSR1 {
-		res.RetCode = RUNTIME_ERROR
-		return
-	}
+	log.Debugf("Detect signal: %v", signal)
 	if signal == syscall.SIGALRM || signal == syscall.SIGXCPU {
 		res.RetCode = TIME_LIMIT
 		return
 	}
 	if signal == syscall.SIGXFSZ {
 		res.RetCode = OUTPUT_LIMIT
+		return
+	}
+	if signal == syscall.SIGUSR1 {
+		res.RetCode = RUNTIME_ERROR
 		return
 	}
 

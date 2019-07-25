@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 )
 
@@ -52,6 +53,8 @@ func (task *RunningTask) runProcess() int {
 }
 
 func (task *RunningTask) Run() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	// execute task
 	task.runProcess()
 	task.trace()

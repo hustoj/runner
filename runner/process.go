@@ -5,9 +5,9 @@ import (
 )
 
 type Process struct {
-	Pid    int
-	Status syscall.WaitStatus
-	Rusage syscall.Rusage
+	Pid      int
+	Status   syscall.WaitStatus
+	Rusage   syscall.Rusage
 	IsKilled bool
 }
 
@@ -54,7 +54,7 @@ func (process *Process) GetTimeCost() int64 {
 
 	uSec := ru.Utime.Usec + ru.Stime.Usec
 
-	return uSec + (ru.Utime.Sec + ru.Stime.Sec) * 1e6
+	return uSec + (ru.Utime.Sec+ru.Stime.Sec)*1e6
 }
 
 func (process *Process) Kill() {

@@ -5,9 +5,9 @@ import (
 )
 
 type TracerDetect struct {
-	Exit    bool
-	prevRax uint64
-	Pid     int
+	Exit       bool
+	prevRax    uint64
+	Pid        int
 	callPolicy *CallPolicy
 }
 

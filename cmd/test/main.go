@@ -18,7 +18,6 @@ func main() {
 	if result.RetCode != setting.Result {
 		fmt.Printf("%s failed! Result not match!\nexpect: %d, actual: %d\n", setting.Name, setting.Result, result.RetCode)
 	} else {
-		fmt.Printf("%s passed!\n",setting.Name)
+		fmt.Printf("%s passed!\n", setting.Name)
 	}
 }
-

@@ -24,10 +24,10 @@ const (
 )
 
 type Result struct {
-	RetCode    int   `json:"status"`
-	PeakMemory int64 `json:"peak_memory"`
+	RetCode      int   `json:"status"`
+	PeakMemory   int64 `json:"peak_memory"`
 	RusageMemory int64 `json:"rusage_memory"`
-	TimeCost   int64 `json:"time"`
+	TimeCost     int64 `json:"time"`
 }
 
 func (res *Result) String() string {

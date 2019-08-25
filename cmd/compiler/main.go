@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/hustoj/runner/runner"
 	"github.com/sirupsen/logrus"
-	"hustoj/runner/runner"
 )
 
 var log *logrus.Logger

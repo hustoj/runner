@@ -1,6 +1,6 @@
 package runner
 
-import "hustoj/runner/sec"
+import "github.com/hustoj/runner/sec"
 
 type CallPolicy struct {
 	oneTimeCalls []bool

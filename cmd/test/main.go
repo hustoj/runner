@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"hustoj/runner/runner"
+	"github.com/hustoj/runner/runner"
 )
 
 func main() {

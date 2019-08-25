@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"hustoj/runner/runner"
+	"github.com/hustoj/runner/runner"
 )
 
 func main() {

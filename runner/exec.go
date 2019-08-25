@@ -117,6 +117,7 @@ func (task *RunningTask) trace() {
 }
 
 func (task *RunningTask) check() {
+	log.Debugf("final check, result %d, memory: %d time: %d\n", task.Result.RetCode, task.Result.PeakMemory, task.Result.TimeCost)
 	if !task.Result.isAccept() {
 		return
 	}
@@ -149,7 +150,7 @@ func (task *RunningTask) outOfTime() bool {
 
 func (task *RunningTask) outOfMemory() bool {
 	// check memory is over limit
-	return (task.Result.PeakMemory > task.memoryLimit) && (task.Result.RusageMemory > task.memoryLimit)
+	return (task.Result.PeakMemory > task.memoryLimit) || (task.Result.RusageMemory > task.memoryLimit)
 }
 
 func (task *RunningTask) refreshTimeCost() {

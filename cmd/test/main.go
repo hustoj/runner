@@ -16,9 +16,9 @@ func main() {
 	result := task.GetResult()
 
 	if result.RetCode != setting.Result {
-		fmt.Printf("Result not match, expect: %d, actual: %d\n", setting.Result, result.RetCode)
+		fmt.Printf("%s failed! Result not match!\nexpect: %d, actual: %d\n", setting.Name, setting.Result, result.RetCode)
 	} else {
-		fmt.Printf("Case passed! expect: %d, actual: %d\n", setting.Result, result.RetCode)
+		fmt.Printf("%s passed!\n",setting.Name)
 	}
 }
 

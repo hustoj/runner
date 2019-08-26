@@ -117,7 +117,7 @@ func (task *RunningTask) trace() {
 }
 
 func (task *RunningTask) check() {
-	log.Debugf("final check, result %d, memory: %d time: %d\n", task.Result.RetCode, task.Result.PeakMemory, task.Result.TimeCost)
+	log.Debugf("final check, result %d, memory: %d time: %d", task.Result.RetCode, task.Result.PeakMemory, task.Result.TimeCost)
 	if !task.Result.isAccept() {
 		return
 	}
@@ -138,19 +138,28 @@ func (task *RunningTask) checkLimit() {
 	}
 	if task.outOfMemory() {
 		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugf("kill by memory limit: current %d, limit %d", task.Result.PeakMemory, task.memoryLimit)
+		log.Debugf("kill by memory limit: peak %d, rusage: %d, limit %d", task.Result.PeakMemory, task.Result.RusageMemory, task.memoryLimit)
 		task.process.Kill()
 		return
 	}
 }
 
 func (task *RunningTask) outOfTime() bool {
-	return task.Result.TimeCost > task.timeLimit
+	isTLE := task.Result.TimeCost > task.timeLimit
+	if isTLE {
+		log.Infof("TLE: Time limit: %d, time coast: %d", task.timeLimit, task.Result.TimeCost)
+	}
+	return isTLE
 }
 
 func (task *RunningTask) outOfMemory() bool {
 	// check memory is over limit
-	return (task.Result.PeakMemory > task.memoryLimit) || (task.Result.RusageMemory > task.memoryLimit)
+	isMLE := (task.Result.PeakMemory > task.memoryLimit) || (task.Result.RusageMemory > task.memoryLimit)
+	if isMLE {
+		log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
+	}
+
+	return isMLE
 }
 
 func (task *RunningTask) refreshTimeCost() {

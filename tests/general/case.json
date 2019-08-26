@@ -2,7 +2,7 @@
   "Name": "General",
   "verbose": true,
   "CPU": 1,
-  "Memory": 2,
+  "Memory": 4,
   "Result": 4,
   "Output": 64
 }

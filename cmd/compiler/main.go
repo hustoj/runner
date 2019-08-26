@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"os"
 	"os/exec"
 	"syscall"
 
 	"github.com/hustoj/runner/runner"
-	"github.com/sirupsen/logrus"
 )
 
-var log *logrus.Logger
+var log *zap.SugaredLogger
 
 type RunResult struct {
 	Success bool `json:"success"`
@@ -39,7 +39,7 @@ func doCompile(cfg *CompileConfig) {
 	args := makeArgs(binary, cfg)
 	err := syscall.Exec(binary, args, env)
 	if err != nil {
-		fmt.Printf("exec failed: %s\n", err)
+		fmt.Printf("exec failed: %s", err)
 	}
 }
 
@@ -81,7 +81,7 @@ func handle(cfg *CompileConfig) *RunResult {
 
 func main() {
 	m := loadConfig()
-	fmt.Printf("%#v\n", m)
+	fmt.Printf("%#v", m)
 	log = runner.InitLogger(m.LogPath, m.Verbose)
 	r := handle(m)
 	res, _ := json.Marshal(r)

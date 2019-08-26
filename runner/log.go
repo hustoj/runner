@@ -1,33 +1,29 @@
 package runner
 
 import (
-	"github.com/sirupsen/logrus"
-	"os"
+	"go.uber.org/zap"
 )
 
-func InitLogger(logPath string, debug bool) *logrus.Logger {
-	log = logrus.New()
+func InitLogger(logPath string, debug bool) *zap.SugaredLogger {
+	var cfg zap.Config
+	if debug {
+		cfg = zap.NewDevelopmentConfig()
+	} else {
+		cfg = zap.NewProductionConfig()
+	}
+
 
 	if len(logPath) > 0 {
-		file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Panicf("open log file failed! %v", err)
-		}
-		log.Out = file
+		cfg.OutputPaths = []string{logPath}
 	} else {
-		log.Out = os.Stdout
+		cfg.OutputPaths = []string{"stderr"}
 	}
 
-	log.Formatter = &logrus.TextFormatter{
-		DisableColors: true,
-		FullTimestamp: true,
+	logger, err := cfg.Build()
+	if err != nil {
+		panic(err)
 	}
 
-	if !debug {
-		log.SetLevel(logrus.WarnLevel)
-	} else {
-		log.SetLevel(logrus.DebugLevel)
-	}
-
+	log = logger.Sugar()
 	return log
 }

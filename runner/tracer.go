@@ -28,7 +28,7 @@ func (tracer *TracerDetect) checkSyscall() bool {
 			if tracer.prevRax != regs.Orig_rax {
 				log.Debugf(">>Name %16v", getName(regs.Orig_rax))
 			}
-			log.Infof("%16X\n", regs.Rax)
+			log.Infof("%16X", regs.Rax)
 		}
 	} else {
 		log.Debugf(">>Name %16v", getName(regs.Orig_rax))

@@ -1,8 +1,8 @@
 package runner
 
-import "github.com/sirupsen/logrus"
+import "go.uber.org/zap"
 
 var (
-	log     *logrus.Logger
+	log     *zap.SugaredLogger
 	setting *TaskConfig
 )

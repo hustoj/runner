@@ -32,7 +32,7 @@ func checkErr(err error) {
 func fork() int {
 	r1, _, errno := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0)
 	if errno != 0 || r1 < 0 {
-		log.Panic("fork failed", errno)
+		log.Panic("fork failed %v", errno)
 	}
 	return int(r1)
 }

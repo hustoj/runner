@@ -61,7 +61,7 @@ func (task *RunningTask) Run() {
 }
 
 func (task *RunningTask) GetResult() *Result {
-	log.Debugln(task.Result.String())
+	log.Debugf(task.Result.String())
 
 	return task.Result
 }
@@ -82,13 +82,13 @@ func (task *RunningTask) trace() {
 		process.Wait()
 
 		if process.Exited() {
-			log.Infoln("program exited!", process.Status.StopSignal())
+			log.Infof("program exited! %v", process.Status.StopSignal())
 			task.parseRunningInfo()
 			break
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infoln("-------- Signal by: ", process.Status.StopSignal())
+			log.Infof("-------- Signal by: ", process.Status.StopSignal())
 			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
@@ -108,7 +108,7 @@ func (task *RunningTask) trace() {
 		task.checkLimit()
 
 		if !process.Continue() {
-			log.Infoln("Program not alive! break")
+			log.Infof("Program not alive! break")
 			break
 		}
 
@@ -161,7 +161,7 @@ func (task *RunningTask) refreshTimeCost() {
 func (task *RunningTask) refreshMemory() {
 	memory, err := GetProcMemory(task.process.Pid)
 	if err != nil {
-		log.Infoln("Get status memory failed:", err)
+		log.Infof("Get status memory failed: %v", err)
 	} else {
 		log.Debugf("peak memory is: %d", memory)
 		if memory > task.Result.PeakMemory {

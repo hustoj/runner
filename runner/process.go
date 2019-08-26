@@ -24,7 +24,7 @@ func (process *Process) Wait() {
 
 func (process *Process) Broken() bool {
 	if !process.Trapped() {
-		log.Debugln("Signal by: ", process.Status.StopSignal())
+		log.Debugf("Signal by: %v", process.Status.StopSignal())
 		return true
 	}
 	return false

@@ -19,7 +19,7 @@ func (tracer *TracerDetect) checkSyscall() bool {
 	var regs syscall.PtraceRegs
 	err := syscall.PtraceGetRegs(tracer.Pid, &regs)
 	if err != nil {
-		log.Debugln("trace failed:", err)
+		log.Debugf("trace failed: %v", err)
 		return true
 	}
 

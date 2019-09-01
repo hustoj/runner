@@ -2,6 +2,6 @@
   "Name": "Memory Limit Case 2",
   "verbose": true,
   "CPU": 10,
-  "Memory": 4,
+  "Memory": 40,
   "Result": 8
 }

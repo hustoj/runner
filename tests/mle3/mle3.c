@@ -6,9 +6,9 @@
 int main() {
     int *c, i;
 
-    for(i = 0; i < 100; i++) {
-        c = (int *)malloc(1024 * 1024);
-        memset(c, 1024 * 1024, 1);
+    for(i = 0; i < 40000; i++) {
+        c = (int *)malloc(1024 * 4);
+        memset(c, sizeof(c), 1);
    }
     return 0;
 }

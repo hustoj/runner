@@ -88,7 +88,7 @@ func (task *RunningTask) trace() {
 		}
 		if process.Broken() {
 			// break by other signal but SIGTRAP
-			log.Infof("-------- Signal by: ", process.Status.StopSignal())
+			log.Infof("-------- Signal by: %d", process.Status.StopSignal())
 			task.parseRunningInfo()
 			task.Result.detectSignal(process.Status.StopSignal())
 			// send kill to process
@@ -117,7 +117,7 @@ func (task *RunningTask) trace() {
 }
 
 func (task *RunningTask) check() {
-	log.Debugf("final check, result %d, memory: %d time: %d", task.Result.RetCode, task.Result.PeakMemory, task.Result.TimeCost)
+	log.Debug(task.Result.String())
 	if !task.Result.isAccept() {
 		return
 	}

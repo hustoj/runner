@@ -31,7 +31,8 @@ type Result struct {
 }
 
 func (res *Result) String() string {
-	return fmt.Sprintf("Result: %d, CPU: %d, PeakMemory: %dkb", res.RetCode, res.TimeCost, res.PeakMemory)
+	return fmt.Sprintf("Result: %d, CPU: %d, PeakMemory: %dkb, RusageMemory: %dkb",
+		res.RetCode, res.TimeCost, res.PeakMemory, res.RusageMemory)
 }
 
 func (res *Result) isAccept() bool {

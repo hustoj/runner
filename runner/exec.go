@@ -90,7 +90,18 @@ func (task *RunningTask) trace() {
 			// break by other signal but SIGTRAP
 			log.Infof("-------- Signal by: %d", process.Status.StopSignal())
 			task.parseRunningInfo()
-			task.Result.detectSignal(process.Status.StopSignal())
+			if process.Status.Stopped() {
+				task.Result.detectSignal(process.Status.StopSignal())
+			} else {
+				if task.outOfTime() {
+					task.Result.RetCode = TIME_LIMIT
+				} else if task.outOfMemory() {
+					task.Result.RetCode = MEMORY_LIMIT
+				} else {
+					log.Warnf("process broken, but cause can't detect")
+				}
+			}
+
 			// send kill to process
 			log.Debugf("Process broken, will kill process")
 			process.Kill()
@@ -199,7 +210,7 @@ func (task *RunningTask) redirectIO() {
 func (task *RunningTask) limitResource() {
 	// max runProcess time
 	timeLimit := uint64(task.setting.CPU)
-	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 1, Cur: timeLimit})
+	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 3, Cur: timeLimit + 1})
 
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit+5), 0, 0)
 

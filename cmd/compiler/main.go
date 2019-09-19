@@ -81,7 +81,6 @@ func handle(cfg *CompileConfig) *RunResult {
 
 func main() {
 	m := loadConfig()
-	fmt.Printf("%#v", m)
 	log = runner.InitLogger(m.LogPath, m.Verbose)
 	r := handle(m)
 	res, _ := json.Marshal(r)

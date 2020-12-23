@@ -15,7 +15,7 @@ type TaskConfig struct {
 	Language int    `default:"2"`
 
 	OneTimeCalls []string `default:"execve"`
-	AllowedCalls []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access"`
+	AllowedCalls []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
 	Verbose      bool     `default:"false"`
 	Name         string
 	Result       int `default:"4"`

@@ -30,8 +30,9 @@ VmPin:         0 kB
 VmHWM:      7308 kB
 VmRSS:      5640 kB
 `
+	expect := int64(7308)
 	ret, _ := parseMemory(fileContent)
-	if ret != 145164 {
+	if ret != expect {
 		t.Errorf("PeakMemory parse failed, %d", ret)
 	}
 }

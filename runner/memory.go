@@ -22,10 +22,7 @@ func parseMemory(content string) (int64, error) {
 		if strings.HasPrefix(line, "VmHWM") {
 			_, value := parseLine(line)
 			ret, err := parseSize(value)
-			if err != nil {
-				return ret, err
-			}
-			return ret, nil
+			return ret, err
 		}
 	}
 	return 0, nil

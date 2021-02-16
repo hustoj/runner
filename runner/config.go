@@ -16,11 +16,13 @@ type TaskConfig struct {
 
 	OneTimeCalls []string `default:"execve"`
 	AllowedCalls []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
+	AdditionCalls []string `default:""`
 	Verbose      bool     `default:"false"`
 	Name         string
 	Result       int `default:"4"`
 
-	LogPath  string `default:"/var/log/runner/runner.log"`
+	//LogPath  string `default:"/var/log/runner/runner.log"`
+	LogPath  string `default:"/tmp/runner.log"`
 	commands []string
 }
 
@@ -37,7 +39,7 @@ func (tc *TaskConfig) parseCommand() {
 
 func (tc *TaskConfig) GetArgs() []string {
 	tc.parseCommand()
-	return tc.commands
+	return tc.commands[1:]
 }
 
 func LoadConfig() *TaskConfig {

@@ -40,6 +40,7 @@ func (task *RunningTask) runProcess() int {
 		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
 
 		env := os.Environ()
+		log.Debugf("Command is %s, Args is %s", task.setting.GetCommand(), task.setting.GetArgs())
 		err := syscall.Exec(task.setting.GetCommand(), task.setting.GetArgs(), env)
 		if err != nil {
 			panic(fmt.Sprintf("Exec failed: %v", err))
@@ -76,7 +77,15 @@ func (task *RunningTask) trace() {
 		prevRax: 0,
 	}
 
-	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &task.setting.AllowedCalls))
+	var allowedCalls = make([]string, len(task.setting.AllowedCalls) + len(task.setting.AdditionCalls));
+	for callIndex := range task.setting.AllowedCalls {
+		allowedCalls = append(allowedCalls, task.setting.AllowedCalls[callIndex])
+	}
+	for callIndex := range task.setting.AdditionCalls {
+		allowedCalls = append(allowedCalls, task.setting.AdditionCalls[callIndex])
+	}
+	log.Debugf("allowed syscall is: %s", allowedCalls)
+	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls))
 
 	for {
 		process.Wait()

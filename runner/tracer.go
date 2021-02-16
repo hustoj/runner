@@ -34,7 +34,7 @@ func (tracer *TracerDetect) checkSyscall() bool {
 		log.Debugf(">>Name %16v", getName(regs.Orig_rax))
 
 		if !tracer.callPolicy.CheckID(regs.Orig_rax) {
-			log.Infof("not allowd syscall %d: %16v ", regs.Orig_rax, getName(regs.Orig_rax))
+			log.Infof("not allowed syscall %d: %16v ", regs.Orig_rax, getName(regs.Orig_rax))
 			return true
 		}
 		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {

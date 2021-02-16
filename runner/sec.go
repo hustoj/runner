@@ -22,6 +22,9 @@ func makeCallPolicy(ones *[]string, allows *[]string) *CallPolicy {
 		oneTimeCalls[n] = true
 	}
 	for _, s := range *allows {
+		if len(s) == 0 {
+			continue
+		}
 		n, err := sec.SCTbl.GetID(s)
 		checkErr(err)
 		allowedCalls[n] = true

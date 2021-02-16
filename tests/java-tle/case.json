@@ -1,0 +1,10 @@
+{
+  "Name": "Java TLE",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 4,
+  "Result": 10,
+  "Output": 64,
+  "AdditionCalls": ["openat"],
+  "Command": "/usr/bin/java Main"
+}

@@ -22,7 +22,7 @@ type TaskConfig struct {
 	Result       int `default:"4"`
 
 	//LogPath  string `default:"/var/log/runner/runner.log"`
-	LogPath  string `default:"/tmp/runner.log"`
+	LogPath  string `default:"/dev/stderr"`
 	commands []string
 }
 

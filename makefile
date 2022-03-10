@@ -3,6 +3,8 @@ MAKEFLAGS += -s
 default:
 	go build -o bin/runner ./cmd/runner
 
+image: build-docker-runner build-docker-compiler
+
 compiler:
 	go build -o bin/compile ./cmd/compiler
 

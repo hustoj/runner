@@ -77,7 +77,7 @@ func (task *RunningTask) trace() {
 		prevRax: 0,
 	}
 
-	var allowedCalls = make([]string, len(task.setting.AllowedCalls) + len(task.setting.AdditionCalls));
+	var allowedCalls = make([]string, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))
 	for callIndex := range task.setting.AllowedCalls {
 		allowedCalls = append(allowedCalls, task.setting.AllowedCalls[callIndex])
 	}

@@ -12,7 +12,6 @@ func InitLogger(logPath string, debug bool) *zap.SugaredLogger {
 		cfg = zap.NewProductionConfig()
 	}
 
-
 	if len(logPath) > 0 {
 		cfg.OutputPaths = []string{logPath}
 	} else {

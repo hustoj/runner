@@ -14,12 +14,12 @@ type TaskConfig struct {
 	Command  string `default:"./main"`
 	Language int    `default:"2"`
 
-	OneTimeCalls []string `default:"execve"`
-	AllowedCalls []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
+	OneTimeCalls  []string `default:"execve"`
+	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
 	AdditionCalls []string `default:""`
-	Verbose      bool     `default:"false"`
-	Name         string
-	Result       int `default:"4"`
+	Verbose       bool     `default:"false"`
+	Name          string
+	Result        int `default:"4"`
 
 	//LogPath  string `default:"/var/log/runner/runner.log"`
 	LogPath  string `default:"/dev/stderr"`

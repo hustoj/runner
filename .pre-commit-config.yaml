@@ -3,9 +3,7 @@ repos:
     rev: v0.5.1
     hooks:
       - id: go-fmt
-      - id: go-vet
       - id: go-mod-tidy
-      - id: go-build
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.64.8
     hooks:

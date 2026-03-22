@@ -2,13 +2,13 @@ package runner
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 )
 
 func GetProcMemory(pid int) (int64, error) {
 	path := fmt.Sprintf("/proc/%d/status", pid)
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}

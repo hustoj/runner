@@ -52,9 +52,9 @@ func (process *Process) Exited() bool {
 func (process *Process) GetTimeCost() int64 {
 	ru := process.Rusage
 
-	uSec := ru.Utime.Usec + ru.Stime.Usec
+	uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec)
 
-	return uSec + (ru.Utime.Sec+ru.Stime.Sec)*1e6
+	return uSec + (int64(ru.Utime.Sec)+int64(ru.Stime.Sec))*1e6
 }
 
 func (process *Process) Kill() {
@@ -64,16 +64,4 @@ func (process *Process) Kill() {
 	log.Debugf("kill, %#v", process.Rusage)
 	process.IsKilled = true
 	syscall.Kill(process.Pid, syscall.SIGKILL)
-}
-
-func (process *Process) Continue() bool {
-	if process.IsKilled {
-		return false
-	}
-	err := syscall.PtraceSyscall(process.Pid, 0)
-	if err != nil {
-		log.Infof("PtraceSyscall: err %v", err)
-		return false
-	}
-	return true
 }

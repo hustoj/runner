@@ -37,7 +37,7 @@ func (task *RunningTask) runProcess() int {
 		task.limitResource()
 		task.redirectIO()
 
-		syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
+		ptraceTraceme()
 
 		env := os.Environ()
 		log.Debugf("Command is %s, Args is %s", task.setting.GetCommand(), task.setting.GetArgs())
@@ -221,7 +221,7 @@ func (task *RunningTask) limitResource() {
 	timeLimit := uint64(task.setting.CPU)
 	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 3, Cur: timeLimit + 1})
 
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(timeLimit+5), 0, 0)
+	setAlarm(timeLimit + 5)
 
 	// max file output size
 	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{

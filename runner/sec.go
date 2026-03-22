@@ -3,8 +3,8 @@ package runner
 import "github.com/hustoj/runner/sec"
 
 type CallPolicy struct {
-	oneTimeCalls []bool
-	allowedCalls []bool
+	oneTimeCalls map[uint64]bool
+	allowedCalls map[uint64]bool
 }
 
 func getName(syscallID uint64) string {
@@ -14,12 +14,12 @@ func getName(syscallID uint64) string {
 }
 
 func makeCallPolicy(ones *[]string, allows *[]string) *CallPolicy {
-	var oneTimeCalls = make([]bool, 400)
-	var allowedCalls = make([]bool, 400)
+	oneTimeCalls := make(map[uint64]bool)
+	allowedCalls := make(map[uint64]bool)
 	for _, s := range *ones {
 		n, err := sec.SCTbl.GetID(s)
 		checkErr(err)
-		oneTimeCalls[n] = true
+		oneTimeCalls[uint64(n)] = true
 	}
 	for _, s := range *allows {
 		if len(s) == 0 {
@@ -27,7 +27,7 @@ func makeCallPolicy(ones *[]string, allows *[]string) *CallPolicy {
 		}
 		n, err := sec.SCTbl.GetID(s)
 		checkErr(err)
-		allowedCalls[n] = true
+		allowedCalls[uint64(n)] = true
 	}
 
 	return &CallPolicy{oneTimeCalls, allowedCalls}
@@ -38,7 +38,7 @@ func (c *CallPolicy) CheckID(callID uint64) bool {
 		return true
 	}
 	if c.oneTimeCalls[callID] {
-		c.oneTimeCalls[callID] = false
+		delete(c.oneTimeCalls, callID)
 		return true
 	}
 	return false

@@ -36,7 +36,9 @@ func (task *RunningTask) runProcess() {
 		}
 	}
 	// return to parent
-	task.initProcess(pid)
+	task.process = new(Process)
+	task.process.Pid = pid
+	log.Debugf("child pid is %d", pid)
 }
 
 func (task *RunningTask) limitResource() {

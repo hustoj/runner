@@ -49,13 +49,9 @@ func (task *RunningTask) trace() {
 		prevRax: 0,
 	}
 
-	var allowedCalls = make([]string, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))
-	for callIndex := range task.setting.AllowedCalls {
-		allowedCalls = append(allowedCalls, task.setting.AllowedCalls[callIndex])
-	}
-	for callIndex := range task.setting.AdditionCalls {
-		allowedCalls = append(allowedCalls, task.setting.AdditionCalls[callIndex])
-	}
+	allowedCalls := make([]string, 0, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))
+	allowedCalls = append(allowedCalls, task.setting.AllowedCalls...)
+	allowedCalls = append(allowedCalls, task.setting.AdditionCalls...)
 	log.Debugf("allowed syscall is: %s", allowedCalls)
 	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls))
 

@@ -3,10 +3,13 @@
 package runner
 
 func ptraceTraceme() {
-	// Darwin has ptrace, but the syscall number and usage can differ.
-	// Providing a stub for now as direct ptrace isn't the focus of this compilation fix.
+	panic("ptraceTraceme is not supported on darwin")
 }
 
 func setAlarm(seconds uint64) {
-	// Darwin doesn't have SYS_ALARM in the same way.
+	panic("setAlarm is not supported on darwin")
+}
+
+func (task *RunningTask) runProcess() {
+	panic("runProcess is not supported on darwin")
 }

@@ -25,6 +25,12 @@ func (task *RunningTask) runProcess() {
 		// enter child
 		task.limitResource()
 		task.redirectIO()
+		if err := applySandbox(task.sandboxConfig()); err != nil {
+			// Cannot use panic() after fork - Go runtime state is inconsistent
+			// Use direct syscall exit instead
+			fmt.Fprintf(os.Stderr, "Apply sandbox failed: %v\n", err)
+			syscall.Exit(1)
+		}
 
 		ptraceTraceme()
 

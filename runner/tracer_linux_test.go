@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,4 +11,15 @@ import (
 
 func TestGetNameReturnsFallbackForUnknownSyscall(t *testing.T) {
 	assert.Equal(t, "unknown_9999", getName(9999))
+}
+
+func TestConsumeBootstrapCallConsumesExecveQuota(t *testing.T) {
+	oneTimeCalls := []string{"execve"}
+	allowedCalls := []string{}
+	tracer := &TracerDetect{}
+
+	tracer.setCallPolicy(makeCallPolicy(&oneTimeCalls, &allowedCalls))
+	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
+
+	assert.False(t, tracer.callPolicy.CheckID(uint64(syscall.SYS_EXECVE)))
 }

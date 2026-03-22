@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/koding/multiconfig v0.0.0-20171124222453-69c27309b2d7
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 )
 

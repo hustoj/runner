@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"os"
 	"runtime"
 )
 
@@ -176,10 +175,4 @@ func (task *RunningTask) refreshMemory() {
 func (task *RunningTask) parseRunningInfo() {
 	task.refreshTimeCost()
 	task.refreshMemory()
-}
-
-func (task *RunningTask) redirectIO() {
-	DupFileForRead("user.in", os.Stdin)
-	DupFileForWrite("user.out", os.Stdout)
-	DupFileForWrite("user.err", os.Stderr)
 }

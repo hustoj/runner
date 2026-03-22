@@ -2,7 +2,6 @@ package runner
 
 import (
 	"os"
-	"time"
 )
 
 func DupFileForRead(filename string, file *os.File) {
@@ -21,8 +20,4 @@ func checkErr(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func getWallDuration(from time.Time) int64 {
-	return time.Since(from).Nanoseconds()
 }

@@ -9,8 +9,21 @@ import (
 	"os/exec"
 	"syscall"
 
+	"go.uber.org/zap"
+
 	"github.com/hustoj/runner/runner"
 )
+
+var log *zap.SugaredLogger
+
+func initLog(m *CompileConfig) {
+	log = runner.InitLogger(m.LogPath, m.Verbose)
+}
+
+func makeArgs(binary string, cfg *CompileConfig) []string {
+	args := cfg.GetArgs()
+	return append([]string{binary}, args...)
+}
 
 func setrLimits(cpu, memory, output, stack uint64) {
 	syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu})

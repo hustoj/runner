@@ -76,3 +76,9 @@ func setResourceLimit(code int, rLimit *syscall.Rlimit) {
 		log.Panic(err)
 	}
 }
+
+func (task *RunningTask) redirectIO() {
+	DupFileForRead("user.in", os.Stdin)
+	DupFileForWrite("user.out", os.Stdout)
+	DupFileForWrite("user.err", os.Stderr)
+}

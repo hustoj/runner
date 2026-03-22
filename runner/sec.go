@@ -7,12 +7,6 @@ type CallPolicy struct {
 	allowedCalls map[uint64]bool
 }
 
-func getName(syscallID uint64) string {
-	name, err := sec.SCTbl.GetName(int(syscallID))
-	checkErr(err)
-	return name
-}
-
 func makeCallPolicy(ones *[]string, allows *[]string) *CallPolicy {
 	oneTimeCalls := make(map[uint64]bool)
 	allowedCalls := make(map[uint64]bool)

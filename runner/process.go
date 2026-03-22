@@ -63,5 +63,7 @@ func (process *Process) Kill() {
 	}
 	log.Debugf("kill, %#v", process.Rusage)
 	process.IsKilled = true
-	syscall.Kill(process.Pid, syscall.SIGKILL)
+	_ = syscall.Kill(process.Pid, syscall.SIGKILL)
+	// reap child to avoid zombie and collect final rusage
+	_, _ = syscall.Wait4(process.Pid, &process.Status, 0, &process.Rusage)
 }

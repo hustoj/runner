@@ -4,7 +4,15 @@ package runner
 
 import (
 	"syscall"
+
+	"github.com/hustoj/runner/sec"
 )
+
+func getName(syscallID uint64) string {
+	name, err := sec.SCTbl.GetName(int(syscallID))
+	checkErr(err)
+	return name
+}
 
 func (tracer *TracerDetect) checkSyscall() bool {
 	var regs syscall.PtraceRegs

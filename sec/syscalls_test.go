@@ -29,3 +29,13 @@ func TestIDNotExisted2(t *testing.T) {
 	_, err := SCTbl.GetName(1000)
 	assert.NotNil(t, err, "err must not be nil")
 }
+
+func TestLatestKernelSyscalls(t *testing.T) {
+	name, err := SCTbl.GetName(437)
+	assert.Equal(t, "openat2", name, "name must be openat2")
+	assert.Nil(t, err, "err must be nil")
+
+	name, err = SCTbl.GetName(471)
+	assert.Equal(t, "rseq_slice_yield", name, "name must be rseq_slice_yield")
+	assert.Nil(t, err, "err must be nil")
+}

@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"fmt"
 	"syscall"
 
 	"github.com/hustoj/runner/sec"
@@ -10,7 +11,9 @@ import (
 
 func getName(syscallID uint64) string {
 	name, err := sec.SCTbl.GetName(int(syscallID))
-	checkErr(err)
+	if err != nil {
+		return fmt.Sprintf("unknown_%d", syscallID)
+	}
 	return name
 }
 

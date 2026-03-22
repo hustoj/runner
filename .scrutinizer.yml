@@ -1,0 +1,21 @@
+checks:
+  go: true
+
+build:
+  nodes:
+    analysis:
+      project_setup:
+        override:
+          - 'true'
+      environment:
+        go:
+          version: go1.25.2
+      tests:
+        override:
+          - go-scrutinizer-run
+          - govet-run
+          - golint-run
+    tests:
+      environment:
+        go:
+          version: go1.25.2

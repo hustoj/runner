@@ -25,14 +25,7 @@ func (tracer *TracerDetect) checkSyscall() bool {
 		return true
 	}
 
-	if tracer.Exit {
-		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
-			if tracer.prevRax != regs.Orig_rax {
-				log.Debugf(">>Name %16v", getName(regs.Orig_rax))
-			}
-			log.Infof("%16X", regs.Rax)
-		}
-	} else {
+	if !tracer.inSyscall {
 		log.Debugf(">>Name %16v", getName(regs.Orig_rax))
 
 		if !tracer.callPolicy.CheckID(regs.Orig_rax) {
@@ -42,11 +35,18 @@ func (tracer *TracerDetect) checkSyscall() bool {
 		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
 			log.Info(getName(regs.Orig_rax))
 		}
+	} else {
+		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
+			if tracer.prevRax != regs.Orig_rax {
+				log.Debugf(">>Name %16v", getName(regs.Orig_rax))
+			}
+			log.Infof("%16X", regs.Rax)
+		}
 	}
 	tracer.prevRax = regs.Orig_rax
 	if tracer.prevRax == syscall.SYS_EXIT_GROUP {
 		log.Debugf("SYS_EXIT_GROUP")
 	}
-	tracer.Exit = !tracer.Exit
+	tracer.inSyscall = !tracer.inSyscall
 	return false
 }

@@ -1,0 +1,8 @@
+{
+  "Name": "Real SIGTRAP should not advance ptrace state",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 4,
+  "Result": 10,
+  "Output": 64
+}

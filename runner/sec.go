@@ -37,3 +37,7 @@ func (c *CallPolicy) CheckID(callID uint64) bool {
 	}
 	return false
 }
+
+func (c *CallPolicy) Consume(callID uint64) {
+	delete(c.oneTimeCalls, callID)
+}

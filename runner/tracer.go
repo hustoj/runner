@@ -1,7 +1,7 @@
 package runner
 
 type TracerDetect struct {
-	Exit       bool
+	inSyscall  bool
 	prevRax    uint64
 	Pid        int
 	callPolicy *CallPolicy
@@ -9,4 +9,11 @@ type TracerDetect struct {
 
 func (tracer *TracerDetect) setCallPolicy(policy *CallPolicy) {
 	tracer.callPolicy = policy
+}
+
+func (tracer *TracerDetect) consumeBootstrapCall(callID uint64) {
+	if tracer.callPolicy == nil {
+		return
+	}
+	tracer.callPolicy.Consume(callID)
 }

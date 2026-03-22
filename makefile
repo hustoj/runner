@@ -27,6 +27,7 @@ testall: prepare
 	cd tests/mle21;make
 	cd tests/mle3;make
 	cd tests/segmentfault;make
+	cd tests/sigtrap;make
 	cd tests/socket;make
 	cd tests/stack;make
 	cd tests/thread;make

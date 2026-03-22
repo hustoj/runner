@@ -2,6 +2,7 @@ package runner
 
 import (
 	"runtime"
+	"syscall"
 )
 
 type RunningTask struct {
@@ -44,7 +45,6 @@ func (task *RunningTask) trace() {
 
 	tracer := TracerDetect{
 		Pid:     task.process.Pid,
-		Exit:    true,
 		prevRax: 0,
 	}
 
@@ -53,6 +53,34 @@ func (task *RunningTask) trace() {
 	allowedCalls = append(allowedCalls, task.setting.AdditionCalls...)
 	log.Debugf("allowed syscall is: %s", allowedCalls)
 	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls))
+	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
+
+	process.Wait()
+	if process.Exited() {
+		log.Infof("program exited before tracing loop")
+		task.parseRunningInfo()
+		task.check()
+		return
+	}
+	if !process.IsInitialTraceStop() {
+		task.handleBrokenTraceStop("unexpected initial ptrace stop")
+		task.check()
+		return
+	}
+	if err := process.SetPtraceOptions(); err != nil {
+		log.Infof("PtraceSetOptions: err %v", err)
+		task.Result.RetCode = RUNTIME_ERROR
+		process.Kill()
+		task.parseRunningInfo()
+		task.check()
+		return
+	}
+	if !process.Continue() {
+		log.Infof("Program not alive after ptrace setup")
+		task.parseRunningInfo()
+		task.check()
+		return
+	}
 
 	for {
 		process.Wait()
@@ -62,25 +90,8 @@ func (task *RunningTask) trace() {
 			task.parseRunningInfo()
 			break
 		}
-		if process.Broken() {
-			// break by other signal but SIGTRAP
-			log.Infof("-------- Signal by: %d", process.Status.StopSignal())
-			task.parseRunningInfo()
-			if process.Status.Stopped() {
-				task.Result.detectSignal(process.Status.StopSignal())
-			} else {
-				if task.outOfTime() {
-					task.Result.RetCode = TIME_LIMIT
-				} else if task.outOfMemory() {
-					task.Result.RetCode = MEMORY_LIMIT
-				} else {
-					log.Warnf("process broken, but cause can't detect")
-				}
-			}
-
-			// send kill to process
-			log.Debugf("Process broken, will kill process")
-			process.Kill()
+		if !process.IsSyscallStop() {
+			task.handleBrokenTraceStop("unexpected non-syscall ptrace stop")
 			break
 		}
 
@@ -101,6 +112,26 @@ func (task *RunningTask) trace() {
 
 	}
 	task.check()
+}
+
+func (task *RunningTask) handleBrokenTraceStop(reason string) {
+	process := task.process
+	log.Infof("%s: %v", reason, process.Status.StopSignal())
+	task.parseRunningInfo()
+	if process.Status.Stopped() {
+		task.Result.detectSignal(process.Status.StopSignal())
+	} else {
+		if task.outOfTime() {
+			task.Result.RetCode = TIME_LIMIT
+		} else if task.outOfMemory() {
+			task.Result.RetCode = MEMORY_LIMIT
+		} else {
+			log.Warnf("process broken, but cause can't detect")
+		}
+	}
+
+	log.Debugf("Process broken, will kill process")
+	process.Kill()
 }
 
 func (task *RunningTask) check() {

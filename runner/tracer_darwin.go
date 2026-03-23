@@ -2,6 +2,7 @@
 
 package runner
 
-func (tracer *TracerDetect) checkSyscall() bool {
-	panic("checkSyscall is not supported on darwin")
+func (_ *TracerDetect) checkSyscall() bool {
+	panicDarwinDevelopmentOnly("TracerDetect.checkSyscall")
+	return false
 }

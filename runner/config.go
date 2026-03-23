@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
-	"strings"
+	"os/exec"
 
+	"github.com/google/shlex"
 	"github.com/koding/multiconfig"
 )
 
@@ -39,6 +41,7 @@ type TaskConfig struct {
 	//LogPath  string `default:"/var/log/runner/runner.log"`
 	LogPath  string `default:"/dev/stderr"`
 	commands []string
+	parseErr error
 }
 
 // Validate checks if the configuration is valid.
@@ -58,19 +61,42 @@ func (tc *TaskConfig) Validate() error {
 }
 
 func (tc *TaskConfig) GetCommand() string {
-	tc.parseCommand()
+	if err := tc.parseCommand(); err != nil || len(tc.commands) == 0 {
+		return ""
+	}
 	return tc.commands[0]
 }
 
-func (tc *TaskConfig) parseCommand() {
-	if len(tc.commands) == 0 {
-		tc.commands = strings.Split(tc.Command, " ")
+func (tc *TaskConfig) parseCommand() error {
+	if len(tc.commands) == 0 && tc.parseErr == nil {
+		tc.commands, tc.parseErr = shlex.Split(tc.Command)
 	}
+	return tc.parseErr
 }
 
 func (tc *TaskConfig) GetArgs() []string {
-	tc.parseCommand()
-	return tc.commands[1:]
+	if err := tc.parseCommand(); err != nil {
+		return nil
+	}
+	args := make([]string, len(tc.commands))
+	copy(args, tc.commands)
+	return args
+}
+
+func (tc *TaskConfig) ResolveExec() (string, []string, error) {
+	if err := tc.parseCommand(); err != nil {
+		return "", nil, err
+	}
+	if len(tc.commands) == 0 || tc.commands[0] == "" {
+		return "", nil, errors.New("empty command")
+	}
+
+	binary, err := exec.LookPath(tc.commands[0])
+	if err != nil {
+		return "", nil, err
+	}
+
+	return binary, tc.GetArgs(), nil
 }
 
 func LoadConfig() *TaskConfig {

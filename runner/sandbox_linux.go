@@ -49,9 +49,9 @@ func (task *RunningTask) sandboxConfig() SandboxConfig {
 // 3. setNoNewPrivs - must happen before dropping privileges (prevents re-gaining privs via setuid binaries)
 // 4. dropPrivileges - must be last (after this we cannot do any privileged operations)
 //
-// WARNING: This function is called after fork() in a Go program. Do NOT use
-// Go runtime features (goroutines, channels, certain stdlib functions) as the
-// runtime state may be inconsistent. Only use direct syscalls.
+// This function runs in the bootstrap child process before ptraceTraceme() and
+// exec(). Keep it limited to straightforward setup logic so the exec boundary
+// stays easy to reason about.
 func applySandbox(cfg SandboxConfig) error {
 	if err := setupNamespaces(cfg); err != nil {
 		return fmt.Errorf("setup namespaces: %w", err)
@@ -135,14 +135,10 @@ func setNoNewPrivs(cfg SandboxConfig) error {
 // After setuid, the process cannot regain privileges.
 func dropPrivileges(cfg SandboxConfig) error {
 	if cfg.UID < 0 && cfg.GID < 0 {
-		// No privilege dropping requested
 		return nil
 	}
 	if cfg.UID < 0 || cfg.GID < 0 {
 		return fmt.Errorf("sandbox uid/gid must be configured together (got uid=%d, gid=%d)", cfg.UID, cfg.GID)
-	}
-	if cfg.UID < 0 || cfg.GID < 0 {
-		return fmt.Errorf("sandbox uid/gid cannot be negative (got uid=%d, gid=%d)", cfg.UID, cfg.GID)
 	}
 	// Clear supplementary groups first
 	if err := syscall.Setgroups([]int{}); err != nil {

@@ -19,6 +19,11 @@ type SandboxConfig struct {
 	UseNetNS   bool
 }
 
+var (
+	_ = (*RunningTask).sandboxConfig
+	_ = applySandbox
+)
+
 func (task *RunningTask) sandboxConfig() SandboxConfig {
 	return SandboxConfig{
 		UID:        task.setting.RunUID,

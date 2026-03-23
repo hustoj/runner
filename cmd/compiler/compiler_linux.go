@@ -3,10 +3,8 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -16,67 +14,81 @@ import (
 
 var log *zap.SugaredLogger
 
+const compilerBootstrapEnv = "RUNNER_COMPILER_BOOTSTRAP"
+
 func initLog(m *CompileConfig) {
 	log = runner.InitLogger(m.LogPath, m.Verbose)
 }
 
-func makeArgs(binary string, cfg *CompileConfig) []string {
-	args := cfg.GetArgs()
-	return append([]string{binary}, args...)
-}
-
-func setrLimits(cpu, memory, output, stack uint64) {
-	syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu})
-	syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Max: output << 20, Cur: output << 20})
-	syscall.Setrlimit(syscall.RLIMIT_STACK, &syscall.Rlimit{Max: stack << 20, Cur: stack << 20})
-	syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20})
+func setrLimits(cpu, memory, output, stack uint64) error {
+	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu}); err != nil {
+		return err
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Max: output << 20, Cur: output << 20}); err != nil {
+		return err
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_STACK, &syscall.Rlimit{Max: stack << 20, Cur: stack << 20}); err != nil {
+		return err
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
+		return err
+	}
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(cpu*3+2), 0, 0)
+	return nil
 }
 
-func doCompile(cfg *CompileConfig) {
-	setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack))
+func doCompile(cfg *CompileConfig) error {
+	if err := setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack)); err != nil {
+		return err
+	}
 	runner.DupFileForWrite("compile.err", os.Stderr)
 	runner.DupFileForWrite("compile.out", os.Stdout)
-	binary, lookErr := exec.LookPath(cfg.Command)
-	if lookErr != nil {
-		panic(lookErr)
+	if err := runner.CloseNonStdioFiles(); err != nil {
+		return err
 	}
 
-	env := os.Environ()
-	args := makeArgs(binary, cfg)
-	err := syscall.Exec(binary, args, env)
+	binary, args, err := cfg.ResolveExec()
 	if err != nil {
-		fmt.Printf("exec failed: %s", err)
+		return err
+	}
+
+	return syscall.Exec(binary, args, runner.BuildMinimalEnv(compilerBootstrapEnv))
+}
+
+func startCompileBootstrapProcess() (int, error) {
+	return runner.StartBootstrapChild(compilerBootstrapEnv)
+}
+
+func bootstrapCompile(cfg *CompileConfig) {
+	if err := doCompile(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "compile bootstrap failed: %v\n", err)
+		syscall.Exit(1)
 	}
 }
 
-func fork() int {
-	r1, _, _ := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0)
-	return int(r1)
-}
-
-func runProcessC(cfg *CompileConfig) int {
-	pid := fork()
-	if pid < 0 {
-		panic(errors.New("fork error"))
-	}
-	if pid == 0 {
-		doCompile(cfg)
-	}
-	return pid
-}
-
-func handle(cfg *CompileConfig) *RunResult {
+func handle(_ *CompileConfig) *RunResult {
 	var status syscall.WaitStatus
 	var rusage syscall.Rusage
-	pid := runProcessC(cfg)
+	pid, err := startCompileBootstrapProcess()
+	if err != nil {
+		log.Errorw("start compile bootstrap failed", "error", err)
+		return &RunResult{Success: false}
+	}
 	log.Info("Child Pid is: ", pid)
 
 	result := RunResult{Success: true}
 
-	pid, _ = syscall.Wait4(pid, &status, 0, &rusage)
-	if status != 0 {
+	_, err = syscall.Wait4(pid, &status, 0, &rusage)
+	if err != nil || !compileSucceeded(status) {
 		result.Success = false
 	}
 	return &result
+}
+
+func compileSucceeded(status syscall.WaitStatus) bool {
+	return status.Exited() && status.ExitStatus() == 0
+}
+
+func isCompilerBootstrapProcess() bool {
+	return os.Getenv(compilerBootstrapEnv) == "1"
 }

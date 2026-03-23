@@ -2,10 +2,16 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/hustoj/runner/runner"
 )
 
 func main() {
+	if runner.IsBootstrapProcess() {
+		runner.BootstrapProcess()
+		return
+	}
+
 	setting := runner.LoadConfig()
 	runner.InitLogger(setting.LogPath, setting.Verbose)
 

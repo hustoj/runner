@@ -13,6 +13,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

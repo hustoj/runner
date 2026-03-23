@@ -6,7 +6,9 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
 
 1. Install Golang 1.25 or newer (**MUST SUPPORT GOMODULES**)
    - This project uses Go 1.25 features and strict type checking.
-   - It supports cross-platform development (Linux/macOS), but core tracing features are only functional on Linux.
+    - Linux is the only supported runtime platform.
+    - macOS is supported for development only: editing, type-checking, and cross-platform builds.
+    - On macOS, the darwin files are compile-time stubs. `cmd/runner`, `cmd/test`, and `cmd/compiler` are not supported as runnable commands.
 2. clone this repo:
 
     ```sh

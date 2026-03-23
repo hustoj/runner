@@ -1,15 +1,34 @@
 //go:build darwin
 
+// Darwin stubs: the core sandbox/ptrace features are Linux-only.
+// These stubs exist solely so the package compiles on macOS for
+// development and IDE support. They must never be called at runtime.
+
 package runner
 
 import (
+	"fmt"
 	"os"
 )
 
-func fileDup(f1 *os.File, f2 *os.File) {
-	panic("fileDup is not supported on darwin")
+const darwinDevelopmentOnlyMessage = "darwin is supported only for development, type-checking, and builds; runtime execution requires linux"
+
+func darwinDevelopmentOnlyError(feature string) error {
+	return fmt.Errorf("%s is unavailable on darwin: %s", feature, darwinDevelopmentOnlyMessage)
 }
 
-func ChangeRunningUser(user int) {
-	panic("ChangeRunningUser is not supported on darwin")
+func panicDarwinDevelopmentOnly(feature string) {
+	panic(darwinDevelopmentOnlyError(feature))
+}
+
+func openFileNoFollow(filename string, flag int, perm uint32) (*os.File, error) {
+	return os.OpenFile(filename, flag, os.FileMode(perm))
+}
+
+func fileDupErr(_ *os.File, _ *os.File) error {
+	return darwinDevelopmentOnlyError("fileDupErr")
+}
+
+func ChangeRunningUser(_ int) {
+	panicDarwinDevelopmentOnly("ChangeRunningUser")
 }

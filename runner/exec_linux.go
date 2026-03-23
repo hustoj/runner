@@ -3,13 +3,16 @@
 package runner
 
 import (
-	"fmt"
 	"os"
 	"syscall"
 )
 
-func ptraceTraceme() {
-	syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
+func ptraceTraceme() error {
+	_, _, errno := syscall.Syscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
 }
 
 func setAlarm(seconds uint64) {
@@ -17,74 +20,54 @@ func setAlarm(seconds uint64) {
 }
 
 func (task *RunningTask) runProcess() {
-	pid := fork()
-	if pid < 0 {
-		log.Panic("fork child failed")
+	pid, err := task.startBootstrapProcess()
+	if err != nil {
+		log.Panicf("start child failed: %v", err)
 	}
-	if pid == 0 {
-		// enter child
-		task.limitResource()
-		task.redirectIO()
-		if err := applySandbox(task.sandboxConfig()); err != nil {
-			// Cannot use panic() after fork - Go runtime state is inconsistent
-			// Use direct syscall exit instead
-			fmt.Fprintf(os.Stderr, "Apply sandbox failed: %v\n", err)
-			syscall.Exit(1)
-		}
 
-		ptraceTraceme()
-
-		env := os.Environ()
-		log.Debugf("Command is %s, Args is %s", task.setting.GetCommand(), task.setting.GetArgs())
-		err := syscall.Exec(task.setting.GetCommand(), task.setting.GetArgs(), env)
-		if err != nil {
-			panic(fmt.Sprintf("Exec failed: %v", err))
-		}
-	}
-	// return to parent
 	task.process = new(Process)
 	task.process.Pid = pid
 	log.Debugf("child pid is %d", pid)
 }
 
-func (task *RunningTask) limitResource() {
-	// max runProcess time
+func (task *RunningTask) limitResource() error {
 	timeLimit := uint64(task.setting.CPU)
-	setResourceLimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 3, Cur: timeLimit + 1})
+	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: timeLimit + 3, Cur: timeLimit + 1}); err != nil {
+		return err
+	}
 
 	setAlarm(timeLimit + 5)
 
-	// max file output size
-	setResourceLimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
 		Max: uint64(task.setting.Output << 21),
 		Cur: uint64(task.setting.Output << 20),
-	})
+	}); err != nil {
+		return err
+	}
 
-	// max memory size
-	// The maximum size of the process stack, in bytes
-	// will cause SIGSEGV
-	memoryLimit := uint64(task.memoryLimit<<10) * 4 // 4 times
+	memoryLimit := uint64(task.memoryLimit<<10) * 4
 	rLimit := &syscall.Rlimit{
-		Max: memoryLimit + 5<<20, // more 5M
-		Cur: memoryLimit,         // 4 times
+		Max: memoryLimit + 5<<20,
+		Cur: memoryLimit,
 	}
-	setResourceLimit(syscall.RLIMIT_STACK, rLimit)
-	// The maximum size of the process's data segment (initialized data, uninitialized data, and heap)
-	setResourceLimit(syscall.RLIMIT_DATA, rLimit)
-	// The maximum size of the process's virtual memory (address space) in bytes
-	// will cause SIGSEGV
-	setResourceLimit(syscall.RLIMIT_AS, rLimit)
+	if err := syscall.Setrlimit(syscall.RLIMIT_STACK, rLimit); err != nil {
+		return err
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_DATA, rLimit); err != nil {
+		return err
+	}
+	if err := syscall.Setrlimit(syscall.RLIMIT_AS, rLimit); err != nil {
+		return err
+	}
+	return nil
 }
 
-func setResourceLimit(code int, rLimit *syscall.Rlimit) {
-	err := syscall.Setrlimit(code, rLimit)
-	if err != nil {
-		log.Panic(err)
+func (task *RunningTask) redirectIO() error {
+	if err := dupFileForRead("user.in", os.Stdin); err != nil {
+		return err
 	}
-}
-
-func (task *RunningTask) redirectIO() {
-	DupFileForRead("user.in", os.Stdin)
-	DupFileForWrite("user.out", os.Stdout)
-	DupFileForWrite("user.err", os.Stderr)
+	if err := dupFileForWrite("user.out", os.Stdout); err != nil {
+		return err
+	}
+	return dupFileForWrite("user.err", os.Stderr)
 }

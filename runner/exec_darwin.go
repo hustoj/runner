@@ -2,6 +2,6 @@
 
 package runner
 
-func (task *RunningTask) runProcess() {
-	panic("runProcess is not supported on darwin")
+func (_ *RunningTask) runProcess() {
+	panicDarwinDevelopmentOnly("RunningTask.runProcess")
 }

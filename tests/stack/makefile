@@ -7,4 +7,4 @@ test:
 	../../bin/test
 
 clean:
-	@rm main user.err user.in user.out
+	@rm -f main user.err user.in user.out

@@ -10,6 +10,13 @@ type RunResult struct {
 }
 
 func main() {
+	if isCompilerBootstrapProcess() {
+		m := loadConfig()
+		initLog(m)
+		bootstrapCompile(m)
+		return
+	}
+
 	m := loadConfig()
 	initLog(m)
 	r := handle(m)

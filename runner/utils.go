@@ -29,14 +29,7 @@ func checkErr(err error) {
 func dupFileForRead(filename string, file *os.File) error {
 	fin, err := openFileNoFollow(filename, syscall.O_RDONLY, 0)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Tests and some local runs rely on missing stdin meaning empty input.
-			// Redirect to /dev/null instead of recreating user.in on disk.
-			fin, err = os.Open("/dev/null")
-		}
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	return fileDupErr(fin, file)
 }

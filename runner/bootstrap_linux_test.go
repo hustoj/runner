@@ -165,3 +165,20 @@ func TestOpenFileNoFollowRejectsSymlink(t *testing.T) {
 		t.Fatal("openFileNoFollow() should reject symlink, but succeeded")
 	}
 }
+
+func TestDupFileForReadReturnsErrorWhenInputMissing(t *testing.T) {
+	target, err := os.Open("/dev/null")
+	if err != nil {
+		t.Fatalf("Open /dev/null: %v", err)
+	}
+	defer closeTestFile(t, target)
+
+	missing := t.TempDir() + "/missing-user.in"
+	err = dupFileForRead(missing, target)
+	if err == nil {
+		t.Fatal("dupFileForRead() should fail when input file is missing")
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("dupFileForRead() error = %v, want not-exist", err)
+	}
+}

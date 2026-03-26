@@ -17,7 +17,12 @@ var log *zap.SugaredLogger
 const compilerBootstrapEnv = "RUNNER_COMPILER_BOOTSTRAP"
 
 func initLog(m *CompileConfig) {
-	log = runner.InitLogger(m.LogPath, m.Verbose)
+	var err error
+	log, err = runner.InitLogger(m.LogPath, m.Verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compiler: init logger: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func setrLimits(cpu, memory, output, stack uint64) error {
@@ -41,8 +46,12 @@ func doCompile(cfg *CompileConfig) error {
 	if err := setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack)); err != nil {
 		return err
 	}
-	runner.DupFileForWrite("compile.err", os.Stderr)
-	runner.DupFileForWrite("compile.out", os.Stdout)
+	if err := runner.DupFileForWrite("compile.err", os.Stderr); err != nil {
+		return err
+	}
+	if err := runner.DupFileForWrite("compile.out", os.Stdout); err != nil {
+		return err
+	}
 	if err := runner.CloseNonStdioFiles(); err != nil {
 		return err
 	}

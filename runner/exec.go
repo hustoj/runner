@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"runtime"
 	"syscall"
 )
@@ -25,21 +26,22 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 	log.Debugf("Time limit: %d, PeakMemory limit: %d", task.timeLimit, task.memoryLimit)
 }
 
-func (task *RunningTask) Run() {
+func (task *RunningTask) Run() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	// execute task
-	task.runProcess()
-	task.trace()
+	if err := task.runProcess(); err != nil {
+		return err
+	}
+	return task.trace()
 }
 
 func (task *RunningTask) GetResult() *Result {
-	log.Debugf(task.Result.String())
+	log.Debug(task.Result.String())
 
 	return task.Result
 }
 
-func (task *RunningTask) trace() {
+func (task *RunningTask) trace() error {
 	process := task.process
 	process.IsKilled = false
 
@@ -52,20 +54,31 @@ func (task *RunningTask) trace() {
 	allowedCalls = append(allowedCalls, task.setting.AllowedCalls...)
 	allowedCalls = append(allowedCalls, task.setting.AdditionCalls...)
 	log.Debugf("allowed syscall is: %s", allowedCalls)
-	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls))
+	policy, err := makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls)
+	if err != nil {
+		process.Kill()
+		return fmt.Errorf("build call policy: %w", err)
+	}
+	tracer.setCallPolicy(policy)
 	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
 
-	process.Wait()
+	if err := process.Wait(); err != nil {
+		log.Infof("initial wait failed: %v", err)
+		task.Result.RetCode = RUNTIME_ERROR
+		process.Kill()
+		task.check()
+		return nil
+	}
 	if process.Exited() {
 		log.Infof("program exited before tracing loop")
 		task.parseRunningInfo()
 		task.check()
-		return
+		return nil
 	}
 	if !process.IsInitialTraceStop() {
 		task.handleBrokenTraceStop("unexpected initial ptrace stop")
 		task.check()
-		return
+		return nil
 	}
 	if err := process.SetPtraceOptions(); err != nil {
 		log.Infof("PtraceSetOptions: err %v", err)
@@ -73,17 +86,22 @@ func (task *RunningTask) trace() {
 		process.Kill()
 		task.parseRunningInfo()
 		task.check()
-		return
+		return nil
 	}
 	if !process.Continue() {
 		log.Infof("Program not alive after ptrace setup")
 		task.parseRunningInfo()
 		task.check()
-		return
+		return nil
 	}
 
 	for {
-		process.Wait()
+		if err := process.Wait(); err != nil {
+			log.Infof("wait in trace loop failed: %v", err)
+			task.Result.RetCode = RUNTIME_ERROR
+			process.Kill()
+			break
+		}
 
 		if process.Exited() {
 			log.Infof("program exited! %v", process.Status.StopSignal())
@@ -112,6 +130,7 @@ func (task *RunningTask) trace() {
 
 	}
 	task.check()
+	return nil
 }
 
 func (task *RunningTask) handleBrokenTraceStop(reason string) {

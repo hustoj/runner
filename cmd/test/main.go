@@ -27,8 +27,15 @@ func main() {
 		return
 	}
 
-	setting := runner.LoadConfig()
-	runner.InitLogger(setting.LogPath, setting.Verbose)
+	setting, err := runner.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "test: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := runner.InitLogger(setting.LogPath, setting.Verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "test: init logger: %v\n", err)
+		os.Exit(1)
+	}
 	if err := materializeInput(setting); err != nil {
 		fmt.Printf("prepare input failed: %v\n", err)
 		os.Exit(1)
@@ -36,7 +43,10 @@ func main() {
 
 	task := runner.RunningTask{}
 	task.Init(setting)
-	task.Run()
+	if err := task.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "test: %v\n", err)
+		os.Exit(1)
+	}
 
 	result := task.GetResult()
 

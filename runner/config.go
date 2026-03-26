@@ -101,15 +101,14 @@ func (tc *TaskConfig) ResolveExec() (string, []string, error) {
 	return binary, tc.GetArgs(), nil
 }
 
-func LoadConfig() *TaskConfig {
+func LoadConfig() (*TaskConfig, error) {
 	m := multiconfig.NewWithPath("case.json")
 	setting = new(TaskConfig)
 	m.MustLoad(setting)
 
-	// Validate configuration after loading
 	if err := setting.Validate(); err != nil {
-		log.Panicf("Invalid configuration: %v", err)
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	return setting
+	return setting, nil
 }

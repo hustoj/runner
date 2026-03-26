@@ -29,6 +29,6 @@ func fileDupErr(_ *os.File, _ *os.File) error {
 	return darwinDevelopmentOnlyError("fileDupErr")
 }
 
-func ChangeRunningUser(_ int) {
-	panicDarwinDevelopmentOnly("ChangeRunningUser")
+func ChangeRunningUser(_ int) error {
+	return darwinDevelopmentOnlyError("ChangeRunningUser")
 }

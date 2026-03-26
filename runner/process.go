@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"syscall"
 )
 
@@ -11,15 +12,18 @@ type Process struct {
 	IsKilled bool
 }
 
-func (process *Process) Wait() {
+func (process *Process) Wait() error {
 	if process.IsKilled {
-		return
+		return nil
 	}
 	pid1, err := syscall.Wait4(process.Pid, &process.Status, 0, &process.Rusage)
-	if pid1 == 0 {
-		log.Panic("not found process")
+	if err != nil {
+		return err
 	}
-	checkErr(err)
+	if pid1 == 0 {
+		return errors.New("wait4 returned pid 0")
+	}
+	return nil
 }
 
 func (process *Process) Broken() bool {

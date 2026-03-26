@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func InitLogger(logPath string, debug bool) *zap.SugaredLogger {
+func InitLogger(logPath string, debug bool) (*zap.SugaredLogger, error) {
 	var cfg zap.Config
 	if debug {
 		cfg = zap.NewDevelopmentConfig()
@@ -20,9 +20,9 @@ func InitLogger(logPath string, debug bool) *zap.SugaredLogger {
 
 	logger, err := cfg.Build()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	log = logger.Sugar()
-	return log
+	return log, nil
 }

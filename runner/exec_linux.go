@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -19,15 +20,16 @@ func setAlarm(seconds uint64) {
 	syscall.Syscall(syscall.SYS_ALARM, uintptr(seconds), 0, 0)
 }
 
-func (task *RunningTask) runProcess() {
+func (task *RunningTask) runProcess() error {
 	pid, err := task.startBootstrapProcess()
 	if err != nil {
-		log.Panicf("start child failed: %v", err)
+		return fmt.Errorf("start child: %w", err)
 	}
 
 	task.process = new(Process)
 	task.process.Pid = pid
 	log.Debugf("child pid is %d", pid)
+	return nil
 }
 
 func (task *RunningTask) limitResource() error {

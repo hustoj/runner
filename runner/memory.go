@@ -1,9 +1,14 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrVmHWMNotFound is returned when /proc/<pid>/status does not contain
+// a VmHWM line (e.g. kernel thread or process already exited).
+var ErrVmHWMNotFound = errors.New("VmHWM not found in proc status")
 
 func parseMemory(content string) (int64, error) {
 	lines := strings.Split(content, "\n")
@@ -14,7 +19,7 @@ func parseMemory(content string) (int64, error) {
 			return ret, err
 		}
 	}
-	return 0, nil
+	return 0, ErrVmHWMNotFound
 }
 
 func parseLine(line string) (string, string) {

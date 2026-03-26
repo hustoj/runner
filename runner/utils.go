@@ -6,24 +6,13 @@ import (
 )
 
 // DupFileForRead opens filename read-only and redirects file to it.
-// The caller is responsible for error handling in the bootstrap path.
-func DupFileForRead(filename string, file *os.File) {
-	if err := dupFileForRead(filename, file); err != nil {
-		panic(err)
-	}
+func DupFileForRead(filename string, file *os.File) error {
+	return dupFileForRead(filename, file)
 }
 
 // DupFileForWrite creates/truncates filename and redirects file to it.
-func DupFileForWrite(filename string, file *os.File) {
-	if err := dupFileForWrite(filename, file); err != nil {
-		panic(err)
-	}
-}
-
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
-	}
+func DupFileForWrite(filename string, file *os.File) error {
+	return dupFileForWrite(filename, file)
 }
 
 func dupFileForRead(filename string, file *os.File) error {

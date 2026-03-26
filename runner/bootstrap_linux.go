@@ -32,8 +32,15 @@ func IsBootstrapProcess() bool {
 // target program. The result is that all preparatory Go code runs in a normal
 // Go process instead of in a post-fork runtime state.
 func BootstrapProcess() {
-	setting := LoadConfig()
-	InitLogger(setting.LogPath, setting.Verbose)
+	setting, err := LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bootstrap config: %v\n", err)
+		syscall.Exit(1)
+	}
+	if _, err := InitLogger(setting.LogPath, setting.Verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "bootstrap logger: %v\n", err)
+		syscall.Exit(1)
+	}
 
 	task := &RunningTask{
 		setting:     setting,

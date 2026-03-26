@@ -47,18 +47,45 @@ func (task *RunningTask) limitResource() error {
 		return err
 	}
 
-	memoryLimit := uint64(task.memoryLimit<<10) * 4
-	rLimit := &syscall.Rlimit{
-		Max: memoryLimit + 5<<20,
-		Cur: memoryLimit,
-	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_STACK, rLimit); err != nil {
+	memoryBytes := uint64(task.memoryLimit) << 10 // KB → bytes
+
+	// RLIMIT_STACK: use independent Stack config (MB → bytes).
+	// Previously this was set to the same 4× amplified memory value,
+	// ignoring the dedicated Stack field entirely.
+	stackBytes := uint64(task.setting.Stack) << 20
+	if err := syscall.Setrlimit(syscall.RLIMIT_STACK, &syscall.Rlimit{
+		Max: stackBytes,
+		Cur: stackBytes,
+	}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_DATA, rLimit); err != nil {
+
+	// RLIMIT_DATA: limit heap/data-segment growth.
+	// A small margin (16 MB) accommodates runtime metadata (e.g. libc
+	// malloc arenas, TLS) without inflating the effective limit.
+	const dataOverhead = 16 << 20 // 16 MB
+	if err := syscall.Setrlimit(syscall.RLIMIT_DATA, &syscall.Rlimit{
+		Max: memoryBytes + dataOverhead,
+		Cur: memoryBytes,
+	}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_AS, rLimit); err != nil {
+
+	// RLIMIT_AS: total virtual address space.
+	// Virtual address space can far exceed resident memory: mmap'd shared
+	// libraries, JVM/Go arena reservations, guard pages, etc.  We allow
+	// max(memoryBytes, 64 MB) of overhead so that heavy runtimes (Java, Go)
+	// can start without ENOMEM, while the ptrace-based VmHWM checker still
+	// enforces the real memory limit at the configured threshold.
+	asOverhead := memoryBytes
+	if asOverhead < 64<<20 {
+		asOverhead = 64 << 20 // minimum 64 MB overhead
+	}
+	asLimit := memoryBytes + asOverhead + stackBytes
+	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{
+		Max: asLimit,
+		Cur: asLimit,
+	}); err != nil {
 		return err
 	}
 

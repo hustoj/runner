@@ -63,7 +63,11 @@ func (process *Process) Kill() {
 	}
 	log.Debugf("kill, %#v", process.Rusage)
 	process.IsKilled = true
-	_ = syscall.Kill(process.Pid, syscall.SIGKILL)
+	// Kill the entire process group to clean up any children the tracee may
+	// have spawned (e.g. via clone/fork when the syscall whitelist allows it).
+	// The child is placed in its own process group at start (Setpgid: true),
+	// so the negative PID targets only the sandboxed tree.
+	_ = syscall.Kill(-process.Pid, syscall.SIGKILL)
 	// reap child to avoid zombie and collect final rusage
 	_, _ = syscall.Wait4(process.Pid, &process.Status, 0, &process.Rusage)
 }

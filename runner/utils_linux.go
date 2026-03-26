@@ -88,6 +88,7 @@ func StartBootstrapChild(markerKey string) (int, error) {
 			os.Stdout,
 			os.Stderr,
 		},
+		Sys: &syscall.SysProcAttr{Setpgid: true},
 	})
 	if err != nil {
 		return 0, err

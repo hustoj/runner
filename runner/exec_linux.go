@@ -59,6 +59,20 @@ func (task *RunningTask) limitResource() error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, rLimit); err != nil {
 		return err
 	}
+
+	// Prevent fork bombs: limit to 1 process for the sandbox UID.
+	const rlimitNProc = 6 // RLIMIT_NPROC not exported by Go's syscall package
+	if err := syscall.Setrlimit(rlimitNProc, &syscall.Rlimit{Max: 1, Cur: 1}); err != nil {
+		return err
+	}
+	// Restrict open file descriptors (stdin/stdout/stderr + a few extras).
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Max: 16, Cur: 16}); err != nil {
+		return err
+	}
+	// Disable core dumps to avoid filling disk with large dumps.
+	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Max: 0, Cur: 0}); err != nil {
+		return err
+	}
 	return nil
 }
 

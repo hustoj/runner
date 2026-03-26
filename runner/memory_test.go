@@ -1,6 +1,10 @@
 package runner
 
-import "testing"
+import (
+	"testing"
+
+	"go.uber.org/zap"
+)
 
 func Test_parseSize(t *testing.T) {
 	ret, _ := parseSize("   145164 kB")
@@ -34,5 +38,29 @@ VmRSS:      5640 kB
 	ret, _ := parseMemory(fileContent)
 	if ret != expect {
 		t.Errorf("PeakMemory parse failed, %d", ret)
+	}
+}
+
+func TestOutOfMemoryUsesPeakMemoryOnly(t *testing.T) {
+	log = zap.NewNop().Sugar()
+	defer func() {
+		log = nil
+	}()
+
+	task := &RunningTask{
+		memoryLimit: 4096,
+		Result: &Result{
+			PeakMemory:   488,
+			RusageMemory: 7144,
+		},
+	}
+
+	if task.outOfMemory() {
+		t.Fatal("outOfMemory() = true, want false when only RusageMemory exceeds limit")
+	}
+
+	task.Result.PeakMemory = 5000
+	if !task.outOfMemory() {
+		t.Fatal("outOfMemory() = false, want true when PeakMemory exceeds limit")
 	}
 }

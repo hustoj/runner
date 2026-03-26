@@ -21,6 +21,8 @@ type TaskConfig struct {
 	RunGID int `default:"-1"` // GID to run as (-1 = no privilege drop)
 
 	Command    string `default:"./main"`
+	Input      string `default:""` // Inline stdin content for local test harnesses
+	InputFile  string `default:""` // Path to file whose contents become user.in
 	Language   int    `default:"2"`
 	WorkDir    string `default:""`      // Working directory (empty = current dir)
 	ChrootDir  string `default:""`      // Chroot jail directory (empty = no chroot)

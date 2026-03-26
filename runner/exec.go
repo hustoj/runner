@@ -171,8 +171,9 @@ func (task *RunningTask) outOfTime() bool {
 }
 
 func (task *RunningTask) outOfMemory() bool {
-	// check memory is over limit
-	isMLE := (task.Result.PeakMemory > task.memoryLimit) || (task.Result.RusageMemory > task.memoryLimit)
+	// PeakMemory comes from the traced program's /proc status and does not
+	// include bootstrap Go runtime noise the way wait4 rusage can.
+	isMLE := task.Result.PeakMemory > task.memoryLimit
 	if isMLE {
 		log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
 	}

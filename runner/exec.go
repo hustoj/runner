@@ -46,8 +46,8 @@ func (task *RunningTask) trace() error {
 	process.IsKilled = false
 
 	tracer := TracerDetect{
-		Pid:     task.process.Pid,
-		prevRax: 0,
+		Pid:         task.process.Pid,
+		prevSyscall: 0,
 	}
 
 	allowedCalls := make([]string, 0, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))

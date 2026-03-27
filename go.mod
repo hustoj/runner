@@ -1,12 +1,14 @@
 module github.com/hustoj/runner
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/koding/multiconfig v0.0.0-20171124222453-69c27309b2d7
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
 )
+
+require golang.org/x/sys v0.42.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect

@@ -1,10 +1,10 @@
 package runner
 
 type TracerDetect struct {
-	inSyscall  bool
-	prevRax    uint64
-	Pid        int
-	callPolicy *CallPolicy
+	inSyscall   bool
+	prevSyscall uint64
+	Pid         int
+	callPolicy  *CallPolicy
 }
 
 func (tracer *TracerDetect) setCallPolicy(policy *CallPolicy) {

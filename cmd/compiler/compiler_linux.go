@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 
 	"github.com/hustoj/runner/runner"
 )
@@ -38,7 +39,9 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
 		return err
 	}
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(cpu*3+2), 0, 0)
+	_, _ = unix.Setitimer(unix.ITIMER_REAL, unix.Itimerval{
+		Value: unix.Timeval{Sec: int64(cpu*3 + 2)},
+	})
 	return nil
 }
 

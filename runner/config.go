@@ -34,7 +34,7 @@ type TaskConfig struct {
 	UseNetNS   bool   `default:"false"` // Isolate network stack
 
 	OneTimeCalls  []string `default:"execve"`
-	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
+	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,exit_group,readlink,access,mprotect"`
 	AdditionCalls []string `default:""`
 	Verbose       bool     `default:"false"`
 	Name          string
@@ -105,6 +105,11 @@ func LoadConfig() (*TaskConfig, error) {
 	m := multiconfig.NewWithPath("case.json")
 	setting = new(TaskConfig)
 	m.MustLoad(setting)
+
+	// Merge architecture-specific default syscalls (e.g., arch_prctl on x86_64)
+	if extra := platformDefaultCalls(); len(extra) > 0 {
+		setting.AllowedCalls = append(setting.AllowedCalls, extra...)
+	}
 
 	if err := setting.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)

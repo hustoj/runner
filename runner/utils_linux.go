@@ -12,7 +12,7 @@ import (
 )
 
 func fileDupErr(f1 *os.File, f2 *os.File) error {
-	if err := syscall.Dup2(int(f1.Fd()), int(f2.Fd())); err != nil {
+	if err := syscall.Dup3(int(f1.Fd()), int(f2.Fd()), 0); err != nil {
 		_ = f1.Close()
 		return err
 	}

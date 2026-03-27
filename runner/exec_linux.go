@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func ptraceTraceme() error {
@@ -16,8 +18,13 @@ func ptraceTraceme() error {
 	return nil
 }
 
+// setAlarm schedules a SIGALRM after the given number of seconds using
+// ITIMER_REAL, which works on all Linux architectures (unlike SYS_ALARM
+// which is x86_64-specific).
 func setAlarm(seconds uint64) {
-	syscall.Syscall(syscall.SYS_ALARM, uintptr(seconds), 0, 0)
+	_, _ = unix.Setitimer(unix.ITIMER_REAL, unix.Itimerval{
+		Value: unix.Timeval{Sec: int64(seconds)},
+	})
 }
 
 func (task *RunningTask) runProcess() error {

@@ -184,7 +184,7 @@ func (task *RunningTask) checkLimit() {
 func (task *RunningTask) outOfTime() bool {
 	isTLE := task.Result.TimeCost > task.timeLimit
 	if isTLE {
-		log.Infof("TLE: Time limit: %d, time coast: %d", task.timeLimit, task.Result.TimeCost)
+		log.Infof("TLE: Time limit: %d, time cost: %d", task.timeLimit, task.Result.TimeCost)
 	}
 	return isTLE
 }

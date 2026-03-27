@@ -3,6 +3,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/google/shlex"
@@ -56,7 +57,7 @@ func (tc *TaskConfig) Validate() error {
 
 	// Warn if namespace is enabled without privilege drop
 	if tc.RunUID < 0 && (tc.UseMountNS || tc.UsePIDNS || tc.UseIPCNS || tc.UseUTSNS || tc.UseNetNS) {
-		log.Warn("Namespaces are enabled but no privilege drop configured - namespace isolation may fail")
+		fmt.Fprintf(os.Stderr, "warning: namespaces are enabled but no privilege drop configured - namespace isolation may fail\n")
 	}
 
 	return nil
@@ -103,17 +104,17 @@ func (tc *TaskConfig) ResolveExec() (string, []string, error) {
 
 func LoadConfig() (*TaskConfig, error) {
 	m := multiconfig.NewWithPath("case.json")
-	setting = new(TaskConfig)
-	m.MustLoad(setting)
+	cfg := new(TaskConfig)
+	m.MustLoad(cfg)
 
 	// Merge architecture-specific default syscalls (e.g., arch_prctl on x86_64)
 	if extra := platformDefaultCalls(); len(extra) > 0 {
-		setting.AllowedCalls = append(setting.AllowedCalls, extra...)
+		cfg.AllowedCalls = append(cfg.AllowedCalls, extra...)
 	}
 
-	if err := setting.Validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	return setting, nil
+	return cfg, nil
 }

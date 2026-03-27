@@ -42,10 +42,7 @@ VmRSS:      5640 kB
 }
 
 func TestOutOfMemoryUsesPeakMemoryOnly(t *testing.T) {
-	log = zap.NewNop().Sugar()
-	defer func() {
-		log = nil
-	}()
+	SetLogger(zap.NewNop().Sugar())
 
 	task := &RunningTask{
 		memoryLimit: 4096,

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"os"
 	"runtime"
 	"syscall"
 )
@@ -59,6 +60,7 @@ func (task *RunningTask) trace() {
 	if process.Exited() {
 		log.Infof("program exited before tracing loop")
 		task.parseRunningInfo()
+		task.applyExitCode(process.Status)
 		task.check()
 		return
 	}
@@ -88,6 +90,7 @@ func (task *RunningTask) trace() {
 		if process.Exited() {
 			log.Infof("program exited! %v", process.Status.StopSignal())
 			task.parseRunningInfo()
+			task.applyExitCode(process.Status)
 			break
 		}
 		if !process.IsSyscallStop() {
@@ -120,6 +123,8 @@ func (task *RunningTask) handleBrokenTraceStop(reason string) {
 	task.parseRunningInfo()
 	if process.Status.Stopped() {
 		task.Result.detectSignal(process.Status.StopSignal())
+	} else if process.Status.Signaled() {
+		task.applyTerminationSignal(process.Status.Signal())
 	} else {
 		if task.outOfTime() {
 			task.Result.RetCode = TIME_LIMIT
@@ -132,6 +137,20 @@ func (task *RunningTask) handleBrokenTraceStop(reason string) {
 
 	log.Debugf("Process broken, will kill process")
 	process.Kill()
+}
+
+func (task *RunningTask) applyExitCode(status syscall.WaitStatus) {
+	if !status.Exited() || status.ExitStatus() == 0 || !task.Result.isAccept() {
+		return
+	}
+	task.Result.RetCode = RUNTIME_ERROR
+}
+
+func (task *RunningTask) applyTerminationSignal(signal os.Signal) {
+	if !task.Result.isAccept() {
+		return
+	}
+	task.Result.detectSignal(signal)
 }
 
 func (task *RunningTask) check() {

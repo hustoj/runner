@@ -5,8 +5,11 @@ package main
 import (
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/hustoj/runner/runner"
 )
 
 func TestResolveExecIncludesBinary(t *testing.T) {
@@ -35,6 +38,21 @@ func TestResolveExecIncludesBinary(t *testing.T) {
 	for i := range wantArgs {
 		if args[i] != wantArgs[i] {
 			t.Fatalf("ResolveExec() args[%d] = %q, want %q", i, args[i], wantArgs[i])
+		}
+	}
+}
+
+func TestBuildMinimalEnvRemovesBootstrapMarker(t *testing.T) {
+	t.Setenv(compilerBootstrapEnv, "1")
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("LD_PRELOAD", "bad.so")
+
+	for _, entry := range runner.BuildMinimalEnv(compilerBootstrapEnv) {
+		if strings.HasPrefix(entry, compilerBootstrapEnv+"=") {
+			t.Fatalf("BuildMinimalEnv() kept bootstrap marker: %q", entry)
+		}
+		if strings.HasPrefix(entry, "LD_PRELOAD=") {
+			t.Fatalf("BuildMinimalEnv() kept unsafe env: %q", entry)
 		}
 	}
 }
@@ -131,17 +149,14 @@ func TestCompileFailureReason(t *testing.T) {
 	}
 }
 
-func TestHandleReturnsFailureWhenCompilerBinaryMissing(t *testing.T) {
+func TestResolveExecReturnsErrorWhenCompilerBinaryMissing(t *testing.T) {
 	cfg := &CompileConfig{
 		Command: "definitely-missing-compiler-binary",
 		Args:    "",
 	}
 
-	result := handle(cfg)
-	if result == nil {
-		t.Fatal("handle() returned nil result")
-	}
-	if result.Success {
-		t.Fatal("handle() should report failure when compiler binary is missing")
+	_, _, err := cfg.ResolveExec()
+	if err == nil {
+		t.Fatal("ResolveExec() should fail when compiler binary is missing")
 	}
 }

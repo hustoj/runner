@@ -14,17 +14,13 @@ import (
 
 var log *zap.SugaredLogger
 
+const compilerBootstrapEnv = "RUNNER_COMPILER_BOOTSTRAP"
+
 const (
 	compileExitDupFailure   = 124
 	compileExitSetupFailure = 125
 	compileExitExecFailure  = 126
 )
-
-type compileExecSpec struct {
-	binary string
-	args   []string
-	env    []string
-}
 
 func initLog(m *CompileConfig) {
 	log = runner.InitLogger(m.LogPath, m.Verbose)
@@ -61,72 +57,41 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	return nil
 }
 
-func prepareCompileExecSpec(cfg *CompileConfig) (compileExecSpec, error) {
-	binary, args, err := cfg.ResolveExec()
-	if err != nil {
-		return compileExecSpec{}, err
+func doCompile(cfg *CompileConfig) error {
+	if err := setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack)); err != nil {
+		return err
+	}
+	if err := runner.DupFileForWrite("compile.err", os.Stderr); err != nil {
+		return err
+	}
+	if err := runner.DupFileForWrite("compile.out", os.Stdout); err != nil {
+		return err
+	}
+	if err := runner.CloseNonStdioFiles(); err != nil {
+		return err
 	}
 
-	return compileExecSpec{
-		binary: binary,
-		args:   args,
-		env:    os.Environ(),
-	}, nil
-}
-
-func dupFileForWrite(filename string, fd int) error {
-	target, err := syscall.Open(filename, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0666)
+	binary, args, err := cfg.ResolveExec()
 	if err != nil {
 		return err
 	}
-	defer syscall.Close(target)
 
-	return syscall.Dup2(target, fd)
+	return syscall.Exec(binary, args, runner.BuildMinimalEnv(compilerBootstrapEnv))
 }
 
-func doCompile(spec compileExecSpec, cfg *CompileConfig) int {
-	if err := setrLimits(uint64(cfg.CPU), uint64(cfg.Memory), uint64(cfg.Output), uint64(cfg.Stack)); err != nil {
-		return compileExitSetupFailure
-	}
-	if err := dupFileForWrite("compile.err", int(os.Stderr.Fd())); err != nil {
-		return compileExitDupFailure
-	}
-	if err := dupFileForWrite("compile.out", int(os.Stdout.Fd())); err != nil {
-		return compileExitDupFailure
-	}
-	if err := syscall.Exec(spec.binary, spec.args, spec.env); err != nil {
-		return compileExitExecFailure
-	}
-
-	return 0
+func startCompileBootstrapProcess() (int, error) {
+	return runner.StartBootstrapChild(compilerBootstrapEnv)
 }
 
-func exitChild(code int) {
-	_, _, _ = syscall.RawSyscall(syscall.SYS_EXIT, uintptr(code), 0, 0)
-	for {
+func bootstrapCompile(cfg *CompileConfig) {
+	if err := doCompile(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "compile bootstrap failed: %v\n", err)
+		syscall.Exit(1)
 	}
 }
 
-func fork() (int, syscall.Errno) {
-	r1, _, errno := syscall.RawSyscall(syscall.SYS_FORK, 0, 0, 0)
-	if errno != 0 || r1 < 0 {
-		return -1, errno
-	}
-	return int(r1), 0
-}
-
-func runProcessC(spec compileExecSpec, cfg *CompileConfig) (int, error) {
-	pid, errno := fork()
-	if errno != 0 || pid < 0 {
-		if errno == 0 {
-			errno = syscall.EINVAL
-		}
-		return 0, errno
-	}
-	if pid == 0 {
-		exitChild(doCompile(spec, cfg))
-	}
-	return pid, nil
+func isCompilerBootstrapProcess() bool {
+	return os.Getenv(compilerBootstrapEnv) == "1"
 }
 
 func compileSucceeded(status syscall.WaitStatus) bool {
@@ -152,17 +117,11 @@ func compileFailureReason(status syscall.WaitStatus) string {
 	return "compiler finished with an unexpected wait status"
 }
 
-func handle(cfg *CompileConfig) *RunResult {
+func handle(_ *CompileConfig) *RunResult {
 	var status syscall.WaitStatus
-	spec, err := prepareCompileExecSpec(cfg)
+	pid, err := startCompileBootstrapProcess()
 	if err != nil {
-		warnf("prepare compiler child failed: %v", err)
-		return &RunResult{Success: false}
-	}
-
-	pid, err := runProcessC(spec, cfg)
-	if err != nil {
-		warnf("fork compiler child failed: %v", err)
+		warnf("start compile bootstrap failed: %v", err)
 		return &RunResult{Success: false}
 	}
 	infof("Child Pid is: %d", pid)

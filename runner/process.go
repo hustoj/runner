@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"syscall"
 )
 
@@ -49,16 +50,16 @@ func NewProcess(pid int) *Process {
 	return process
 }
 
-func (process *Process) Wait() bool {
+func (process *Process) Wait() (bool, error) {
 	if process.IsKilled || !process.HasActiveTracees() {
-		return false
+		return false, nil
 	}
 	if pid, stop, ok := process.takePendingTrackedStop(); ok {
 		process.CurrentPid = pid
 		process.Status = stop.status
 		process.Rusage = stop.rusage
 		process.recordRusage(pid, stop.rusage)
-		return true
+		return true, nil
 	}
 	for {
 		pid1, err := syscall.Wait4(-1, &process.Status, waitOptions(), &process.Rusage)
@@ -67,16 +68,18 @@ func (process *Process) Wait() bool {
 		}
 		if err == syscall.ECHILD {
 			process.clearPendingStops()
-			return false
+			return false, nil
 		}
 		if pid1 == 0 {
-			log.Panic("not found process")
+			return false, errors.New("wait4 returned pid 0")
 		}
-		checkErr(err)
+		if err != nil {
+			return false, err
+		}
 		if process.HasTracee(pid1) {
 			process.CurrentPid = pid1
 			process.recordRusage(pid1, process.Rusage)
-			return true
+			return true, nil
 		}
 		process.rememberPendingStop(pid1, process.Status, process.Rusage)
 	}

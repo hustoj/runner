@@ -31,7 +31,7 @@ type Result struct {
 }
 
 func (res *Result) String() string {
-	return fmt.Sprintf("Result: %d, CPU: %d, PeakMemory: %dkb, RusageMemory: %dkb",
+	return fmt.Sprintf("Result: %d, TimeCost: %d, PeakMemory: %dkb, RusageMemory: %dkb",
 		res.RetCode, res.TimeCost, res.PeakMemory, res.RusageMemory)
 }
 

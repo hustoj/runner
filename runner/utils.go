@@ -30,9 +30,3 @@ func dupFileForWrite(filename string, file *os.File) error {
 	}
 	return fileDupErr(fout, file)
 }
-
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
-	}
-}

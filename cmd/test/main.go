@@ -18,12 +18,19 @@ func materializeInput(setting *runner.TaskConfig) error {
 		}
 		content = data
 	}
-	return os.WriteFile(inputFileName, content, 0o600)
+	return os.WriteFile(inputFileName, content, 0600)
 }
 
 func main() {
-	setting := runner.LoadConfig()
-	runner.InitLogger(setting.LogPath, setting.Verbose)
+	setting, err := runner.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "test: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := runner.InitLogger(setting.LogPath, setting.Verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "test: init logger: %v\n", err)
+		os.Exit(1)
+	}
 	setting.LogValidationWarnings()
 	if err := materializeInput(setting); err != nil {
 		fmt.Printf("prepare input failed: %v\n", err)
@@ -32,7 +39,10 @@ func main() {
 
 	task := runner.RunningTask{}
 	task.Init(setting)
-	task.Run()
+	if err := task.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "test: %v\n", err)
+		os.Exit(1)
+	}
 
 	result := task.GetResult()
 

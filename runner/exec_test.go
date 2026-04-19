@@ -54,7 +54,8 @@ func TestApplyExitCodeDoesNotOverrideExistingResult(t *testing.T) {
 }
 
 func TestApplyTerminationSignalTreatsSIGKILLAsTimeLimitWhenOverTime(t *testing.T) {
-	InitLogger("/dev/null", false)
+	_, err := InitLogger("/dev/null", false)
+	assert.NoError(t, err)
 
 	task := RunningTask{
 		Result:    &Result{},
@@ -69,7 +70,8 @@ func TestApplyTerminationSignalTreatsSIGKILLAsTimeLimitWhenOverTime(t *testing.T
 }
 
 func TestApplyTerminationSignalKeepsRuntimeErrorForSIGKILLWithinLimits(t *testing.T) {
-	InitLogger("/dev/null", false)
+	_, err := InitLogger("/dev/null", false)
+	assert.NoError(t, err)
 
 	task := RunningTask{
 		Result:    &Result{},

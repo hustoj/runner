@@ -9,18 +9,17 @@ import (
 )
 
 func TestMaterializeInputWritesInlineContent(t *testing.T) {
-	oldWD, err := os.Getwd()
+	oldWd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("os.Getwd() error = %v", err)
+		t.Fatalf("Getwd: %v", err)
 	}
-
-	tempDir := t.TempDir()
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("os.Chdir(%q) error = %v", tempDir, err)
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir tmpDir: %v", err)
 	}
 	defer func() {
-		if err := os.Chdir(oldWD); err != nil {
-			t.Fatalf("restore working directory error = %v", err)
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("Restore wd: %v", err)
 		}
 	}()
 
@@ -29,9 +28,9 @@ func TestMaterializeInputWritesInlineContent(t *testing.T) {
 		t.Fatalf("materializeInput() error = %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(tempDir, inputFileName))
+	content, err := os.ReadFile(filepath.Join(tmpDir, inputFileName))
 	if err != nil {
-		t.Fatalf("os.ReadFile(user.in) error = %v", err)
+		t.Fatalf("ReadFile user.in: %v", err)
 	}
 	if string(content) != "1 2 3\n" {
 		t.Fatalf("user.in content = %q, want %q", string(content), "1 2 3\n")
@@ -39,18 +38,17 @@ func TestMaterializeInputWritesInlineContent(t *testing.T) {
 }
 
 func TestMaterializeInputCreatesEmptyFileWhenNoInputProvided(t *testing.T) {
-	oldWD, err := os.Getwd()
+	oldWd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("os.Getwd() error = %v", err)
+		t.Fatalf("Getwd: %v", err)
 	}
-
-	tempDir := t.TempDir()
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("os.Chdir(%q) error = %v", tempDir, err)
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir tmpDir: %v", err)
 	}
 	defer func() {
-		if err := os.Chdir(oldWD); err != nil {
-			t.Fatalf("restore working directory error = %v", err)
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("Restore wd: %v", err)
 		}
 	}()
 
@@ -59,9 +57,9 @@ func TestMaterializeInputCreatesEmptyFileWhenNoInputProvided(t *testing.T) {
 		t.Fatalf("materializeInput() error = %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(tempDir, inputFileName))
+	info, err := os.Stat(filepath.Join(tmpDir, inputFileName))
 	if err != nil {
-		t.Fatalf("os.Stat(user.in) error = %v", err)
+		t.Fatalf("Stat user.in: %v", err)
 	}
 	if info.Size() != 0 {
 		t.Fatalf("user.in size = %d, want 0", info.Size())
@@ -69,24 +67,23 @@ func TestMaterializeInputCreatesEmptyFileWhenNoInputProvided(t *testing.T) {
 }
 
 func TestMaterializeInputReadsFromInputFile(t *testing.T) {
-	oldWD, err := os.Getwd()
+	oldWd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("os.Getwd() error = %v", err)
+		t.Fatalf("Getwd: %v", err)
 	}
-
-	tempDir := t.TempDir()
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("os.Chdir(%q) error = %v", tempDir, err)
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir tmpDir: %v", err)
 	}
 	defer func() {
-		if err := os.Chdir(oldWD); err != nil {
-			t.Fatalf("restore working directory error = %v", err)
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("Restore wd: %v", err)
 		}
 	}()
 
-	source := filepath.Join(tempDir, "stdin.txt")
-	if err := os.WriteFile(source, []byte("abc\n"), 0o600); err != nil {
-		t.Fatalf("os.WriteFile(%q) error = %v", source, err)
+	source := filepath.Join(tmpDir, "stdin.txt")
+	if err := os.WriteFile(source, []byte("abc\n"), 0600); err != nil {
+		t.Fatalf("Write source: %v", err)
 	}
 
 	setting := &runner.TaskConfig{InputFile: source}
@@ -94,9 +91,9 @@ func TestMaterializeInputReadsFromInputFile(t *testing.T) {
 		t.Fatalf("materializeInput() error = %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(tempDir, inputFileName))
+	content, err := os.ReadFile(filepath.Join(tmpDir, inputFileName))
 	if err != nil {
-		t.Fatalf("os.ReadFile(user.in) error = %v", err)
+		t.Fatalf("ReadFile user.in: %v", err)
 	}
 	if string(content) != "abc\n" {
 		t.Fatalf("user.in content = %q, want %q", string(content), "abc\n")

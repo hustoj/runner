@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -25,19 +24,15 @@ func TestValidateRejectsInvalidSyscallName(t *testing.T) {
 			runWithTempCaseJSON(t, tt.json, func() {
 				SetLogger(nil)
 
-				defer func() {
-					recovered := recover()
-					if recovered == nil {
-						t.Fatalf("LoadConfig() should panic for invalid syscall name")
-					}
+				_, err := LoadConfig()
+				if err == nil {
+					t.Fatalf("LoadConfig() should return an error for invalid syscall name")
+				}
 
-					message := fmt.Sprint(recovered)
-					if !strings.Contains(message, tt.wantMsg) {
-						t.Fatalf("panic = %q, want %q", message, tt.wantMsg)
-					}
-				}()
-
-				LoadConfig()
+				message := err.Error()
+				if !strings.Contains(message, tt.wantMsg) {
+					t.Fatalf("error = %q, want %q", message, tt.wantMsg)
+				}
 			})
 		})
 	}
@@ -51,7 +46,10 @@ func TestValidateAcceptsValidSyscallNames(t *testing.T) {
 	runWithTempCaseJSON(t, json, func() {
 		SetLogger(nil)
 
-		cfg := LoadConfig()
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}

@@ -23,7 +23,12 @@ const (
 )
 
 func initLog(m *CompileConfig) {
-	log = runner.InitLogger(m.LogPath, m.Verbose)
+	var err error
+	log, err = runner.InitLogger(m.LogPath, m.Verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compiler: init logger: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func warnf(format string, args ...interface{}) {

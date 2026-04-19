@@ -4,6 +4,7 @@ package runner
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"path/filepath"
 	"syscall"
@@ -139,25 +140,23 @@ func setAlarm(seconds uint64) syscall.Errno {
 	return errno
 }
 
-func (task *RunningTask) runProcess() bool {
+func (task *RunningTask) runProcess() error {
 	spec, err := task.prepareChildProcessSpec()
 	if err != nil {
-		log.Infof("prepare child process failed: %v", err)
-		task.Result.RetCode = RUNTIME_ERROR
-		return false
+		return err
 	}
 
 	pipeFDs := [2]int{-1, -1}
 	if err := syscall.Pipe2(pipeFDs[:], syscall.O_CLOEXEC); err != nil {
 		closeChildIOFiles(spec.io)
-		log.Panicf("create child startup pipe failed: %v", err)
+		return fmt.Errorf("create child startup pipe: %w", err)
 	}
 
 	pid, errno := fork()
 	if errno != 0 || pid < 0 {
 		closeChildIOFiles(spec.io)
 		closePipeFDs(pipeFDs)
-		log.Panicf("fork child failed: %v", errno)
+		return fmt.Errorf("fork child: %w", errno)
 	}
 
 	if pid == 0 {
@@ -170,21 +169,17 @@ func (task *RunningTask) runProcess() bool {
 	failure, err := readChildStartupFailure(pipeFDs[0])
 	_ = syscall.Close(pipeFDs[0])
 	if err != nil {
-		log.Infof("read child startup pipe failed: %v", err)
-		task.Result.RetCode = RUNTIME_ERROR
 		waitChildStartupFailure(pid)
-		return false
+		return fmt.Errorf("read child startup pipe: %w", err)
 	}
 	if failure.failed() {
-		log.Infof("child startup failed at %s: %v", failure.stage, failure.errno)
-		task.Result.RetCode = RUNTIME_ERROR
 		waitChildStartupFailure(pid)
-		return false
+		return fmt.Errorf("child startup failed at %s: %w", failure.stage, failure.errno)
 	}
 
 	task.process = NewProcess(pid)
 	log.Debugf("child pid is %d", pid)
-	return true
+	return nil
 }
 
 func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {

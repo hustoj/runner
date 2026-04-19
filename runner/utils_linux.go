@@ -118,9 +118,6 @@ func fork() (int, syscall.Errno) {
 	return int(r1), 0
 }
 
-func ChangeRunningUser(user int) {
-	err := syscall.Setuid(user)
-	if err != nil {
-		log.Panicf("set running uid failed %v", err)
-	}
+func ChangeRunningUser(user int) error {
+	return syscall.Setuid(user)
 }

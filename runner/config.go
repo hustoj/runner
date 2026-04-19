@@ -71,12 +71,10 @@ func (tc *TaskConfig) Validate() error {
 		return fmt.Errorf("stack must be >= 0 (got %d)", tc.Stack)
 	}
 
-	// Check UID/GID pairing
 	if (tc.RunUID >= 0 && tc.RunGID < 0) || (tc.RunUID < 0 && tc.RunGID >= 0) {
 		return fmt.Errorf("runUID and runGID must both be set or both be -1 (got uid=%d, gid=%d)", tc.RunUID, tc.RunGID)
 	}
 
-	// Validate syscall names (platform-dependent; only effective on linux/amd64)
 	if err := validateSyscallNames("oneTimeCalls", tc.OneTimeCalls); err != nil {
 		return err
 	}
@@ -169,15 +167,16 @@ func (tc *TaskConfig) ResolveExec() (string, []string, error) {
 	return binary, args, nil
 }
 
-func LoadConfig() *TaskConfig {
+func LoadConfig() (*TaskConfig, error) {
 	m := multiconfig.NewWithPath("case.json")
 	cfg := new(TaskConfig)
-	m.MustLoad(cfg)
-
-	// Validate configuration after loading
-	if err := cfg.Validate(); err != nil {
-		panic(fmt.Errorf("invalid configuration: %w", err))
+	if err := m.Load(cfg); err != nil {
+		return nil, err
 	}
 
-	return cfg
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	return cfg, nil
 }

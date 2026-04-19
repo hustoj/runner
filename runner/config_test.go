@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +15,10 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 	runWithTempCaseJSON(t, `{"UseNetNS":true,"RunUID":-1,"RunGID":-1}`, func() {
 		SetLogger(nil)
 
-		cfg := LoadConfig()
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
 		warnings := cfg.ValidationWarnings()
 		if len(warnings) != 1 {
 			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
@@ -27,29 +29,24 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 	})
 }
 
-func TestLoadConfigInvalidConfigurationPanicsWithoutLogger(t *testing.T) {
+func TestLoadConfigInvalidConfigurationReturnsErrorWithoutLogger(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
 	runWithTempCaseJSON(t, `{"RunUID":1000,"RunGID":-1}`, func() {
 		SetLogger(nil)
 
-		defer func() {
-			recovered := recover()
-			if recovered == nil {
-				t.Fatal("LoadConfig() should panic for invalid configuration")
-			}
-
-			message := fmt.Sprint(recovered)
-			if !strings.Contains(message, "invalid configuration") {
-				t.Fatalf("panic = %q, want invalid configuration message", message)
-			}
-			if strings.Contains(message, "nil pointer dereference") {
-				t.Fatalf("panic = %q, should not be nil pointer dereference", message)
-			}
-		}()
-
-		LoadConfig()
+		_, err := LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() should return an error for invalid configuration")
+		}
+		message := err.Error()
+		if !strings.Contains(message, "invalid configuration") {
+			t.Fatalf("error = %q, want invalid configuration message", message)
+		}
+		if strings.Contains(message, "nil pointer dereference") {
+			t.Fatalf("error = %q, should not be nil pointer dereference", message)
+		}
 	})
 }
 
@@ -74,19 +71,15 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 			runWithTempCaseJSON(t, tt.json, func() {
 				SetLogger(nil)
 
-				defer func() {
-					recovered := recover()
-					if recovered == nil {
-						t.Fatalf("LoadConfig() should panic for negative %s", tt.name)
-					}
+				_, err := LoadConfig()
+				if err == nil {
+					t.Fatalf("LoadConfig() should return an error for negative %s", tt.name)
+				}
 
-					message := fmt.Sprint(recovered)
-					if !strings.Contains(message, tt.wantMsg) {
-						t.Fatalf("panic = %q, want %q", message, tt.wantMsg)
-					}
-				}()
-
-				LoadConfig()
+				message := err.Error()
+				if !strings.Contains(message, tt.wantMsg) {
+					t.Fatalf("error = %q, want %q", message, tt.wantMsg)
+				}
 			})
 		})
 	}

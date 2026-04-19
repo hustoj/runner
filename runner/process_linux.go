@@ -33,7 +33,7 @@ func (process *Process) Continue() bool {
 }
 
 func (process *Process) IsInitialTraceStop() bool {
-	return process.Status.Stopped() && process.Status.StopSignal() == syscall.SIGTRAP
+	return process.Status.Stopped() && process.Status.StopSignal() == syscall.SIGTRAP && process.Status.TrapCause() == 0
 }
 
 func (process *Process) IsSyscallStop() bool {

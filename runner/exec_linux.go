@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 	"unsafe"
 )
@@ -112,6 +113,10 @@ type childProcessSpec struct {
 	stackLimit      syscall.Rlimit
 	hardMemoryLimit syscall.Rlimit
 	alarmSeconds    uint64
+}
+
+func openChildIOFile(path string, flags int, perm uint32) (int, error) {
+	return syscall.Open(filepath.Clean(path), flags|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, perm)
 }
 
 func ptraceTraceme() syscall.Errno {
@@ -249,21 +254,21 @@ func prepareChildExecSpec(setting *TaskConfig) (childExecSpec, error) {
 func openChildIOFiles() (childIOFiles, error) {
 	ioFiles := childIOFiles{stdin: -1, stdout: -1, stderr: -1}
 
-	stdin, err := syscall.Open("user.in", syscall.O_RDONLY|syscall.O_CREAT, 0666)
+	stdin, err := openChildIOFile("user.in", syscall.O_RDONLY, 0)
 	if err != nil {
 		closeChildIOFiles(ioFiles)
 		return childIOFiles{}, err
 	}
 	ioFiles.stdin = stdin
 
-	stdout, err := syscall.Open("user.out", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0666)
+	stdout, err := openChildIOFile("user.out", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0o600)
 	if err != nil {
 		closeChildIOFiles(ioFiles)
 		return childIOFiles{}, err
 	}
 	ioFiles.stdout = stdout
 
-	stderr, err := syscall.Open("user.err", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0666)
+	stderr, err := openChildIOFile("user.err", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0o600)
 	if err != nil {
 		closeChildIOFiles(ioFiles)
 		return childIOFiles{}, err

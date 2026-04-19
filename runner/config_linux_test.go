@@ -23,8 +23,7 @@ func TestValidateRejectsInvalidSyscallName(t *testing.T) {
 			defer restoreGlobals()
 
 			runWithTempCaseJSON(t, tt.json, func() {
-				log = nil
-				setting = nil
+				SetLogger(nil)
 
 				defer func() {
 					recovered := recover()
@@ -50,8 +49,7 @@ func TestValidateAcceptsValidSyscallNames(t *testing.T) {
 
 	json := `{"OneTimeCalls":["execve"],"AllowedCalls":["read","write","brk"],"AdditionCalls":["mmap"]}`
 	runWithTempCaseJSON(t, json, func() {
-		log = nil
-		setting = nil
+		SetLogger(nil)
 
 		cfg := LoadConfig()
 		if err := cfg.Validate(); err != nil {

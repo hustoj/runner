@@ -14,8 +14,7 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 	defer restoreGlobals()
 
 	runWithTempCaseJSON(t, `{"UseNetNS":true,"RunUID":-1,"RunGID":-1}`, func() {
-		log = nil
-		setting = nil
+		SetLogger(nil)
 
 		cfg := LoadConfig()
 		warnings := cfg.ValidationWarnings()
@@ -33,8 +32,7 @@ func TestLoadConfigInvalidConfigurationPanicsWithoutLogger(t *testing.T) {
 	defer restoreGlobals()
 
 	runWithTempCaseJSON(t, `{"RunUID":1000,"RunGID":-1}`, func() {
-		log = nil
-		setting = nil
+		SetLogger(nil)
 
 		defer func() {
 			recovered := recover()
@@ -74,8 +72,7 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 			defer restoreGlobals()
 
 			runWithTempCaseJSON(t, tt.json, func() {
-				log = nil
-				setting = nil
+				SetLogger(nil)
 
 				defer func() {
 					recovered := recover()
@@ -182,11 +179,9 @@ func TestResolveExecPreservesExplicitArgsPrecedence(t *testing.T) {
 
 func preserveConfigTestGlobals() func() {
 	previousLog := log
-	previousSetting := setting
 
 	return func() {
-		log = previousLog
-		setting = previousSetting
+		SetLogger(previousLog)
 	}
 }
 

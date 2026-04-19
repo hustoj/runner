@@ -179,6 +179,5 @@ func LoadConfig() *TaskConfig {
 		panic(fmt.Errorf("invalid configuration: %w", err))
 	}
 
-	setting = cfg
-	return setting
+	return cfg
 }

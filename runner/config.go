@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/koding/multiconfig"
@@ -41,6 +42,8 @@ type TaskConfig struct {
 	commands []string
 }
 
+const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
+
 // Validate checks if the configuration is valid.
 // Returns an error if any required constraints are violated.
 func (tc *TaskConfig) Validate() error {
@@ -49,12 +52,28 @@ func (tc *TaskConfig) Validate() error {
 		return fmt.Errorf("RunUID and RunGID must both be set or both be -1 (got uid=%d, gid=%d)", tc.RunUID, tc.RunGID)
 	}
 
-	// Warn if namespace is enabled without privilege drop
+	return nil
+}
+
+// ValidationWarnings returns non-fatal configuration diagnostics.
+func (tc *TaskConfig) ValidationWarnings() []string {
 	if tc.RunUID < 0 && (tc.UseMountNS || tc.UsePIDNS || tc.UseIPCNS || tc.UseUTSNS || tc.UseNetNS) {
-		log.Warn("Namespaces are enabled but no privilege drop configured - namespace isolation may fail")
+		return []string{namespacePrivilegeWarning}
 	}
 
 	return nil
+}
+
+// LogValidationWarnings emits non-fatal configuration diagnostics.
+func (tc *TaskConfig) LogValidationWarnings() {
+	for _, warning := range tc.ValidationWarnings() {
+		if log != nil {
+			log.Warn(warning)
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "WARN: %s\n", warning)
+	}
 }
 
 func (tc *TaskConfig) GetCommand() string {
@@ -75,13 +94,14 @@ func (tc *TaskConfig) GetArgs() []string {
 
 func LoadConfig() *TaskConfig {
 	m := multiconfig.NewWithPath("case.json")
-	setting = new(TaskConfig)
-	m.MustLoad(setting)
+	cfg := new(TaskConfig)
+	m.MustLoad(cfg)
 
 	// Validate configuration after loading
-	if err := setting.Validate(); err != nil {
-		log.Panicf("Invalid configuration: %v", err)
+	if err := cfg.Validate(); err != nil {
+		panic(fmt.Errorf("invalid configuration: %w", err))
 	}
 
+	setting = cfg
 	return setting
 }

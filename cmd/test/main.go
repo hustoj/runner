@@ -8,6 +8,7 @@ import (
 func main() {
 	setting := runner.LoadConfig()
 	runner.InitLogger(setting.LogPath, setting.Verbose)
+	setting.LogValidationWarnings()
 
 	task := runner.RunningTask{}
 	task.Init(setting)

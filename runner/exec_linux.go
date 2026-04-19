@@ -5,7 +5,6 @@ package runner
 import (
 	"encoding/binary"
 	"io"
-	"os"
 	"path/filepath"
 	"syscall"
 	"unsafe"
@@ -20,9 +19,12 @@ const (
 	childStageLimitStack
 	childStageLimitData
 	childStageLimitAddressSpace
+	childStageLimitOpenFiles
+	childStageLimitCore
 	childStageDupStdin
 	childStageDupStdout
 	childStageDupStderr
+	childStageSetProcessGroup
 	childStageSandboxNamespaces
 	childStageSandboxInvalidCredentials
 	childStageSandboxChroot
@@ -59,12 +61,18 @@ func (s childStartupStage) String() string {
 		return "set data rlimit"
 	case childStageLimitAddressSpace:
 		return "set address-space rlimit"
+	case childStageLimitOpenFiles:
+		return "set open-file rlimit"
+	case childStageLimitCore:
+		return "set core-dump rlimit"
 	case childStageDupStdin:
 		return "dup stdin"
 	case childStageDupStdout:
 		return "dup stdout"
 	case childStageDupStderr:
 		return "dup stderr"
+	case childStageSetProcessGroup:
+		return "set process group"
 	case childStageSandboxNamespaces:
 		return "setup namespaces"
 	case childStageSandboxInvalidCredentials:
@@ -112,6 +120,8 @@ type childProcessSpec struct {
 	outputLimit     syscall.Rlimit
 	stackLimit      syscall.Rlimit
 	hardMemoryLimit syscall.Rlimit
+	noFileLimit     syscall.Rlimit
+	coreLimit       syscall.Rlimit
 	alarmSeconds    uint64
 }
 
@@ -219,6 +229,14 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 			Max: hardMemoryLimit,
 			Cur: hardMemoryLimit,
 		},
+		noFileLimit: syscall.Rlimit{
+			Max: 16,
+			Cur: 16,
+		},
+		coreLimit: syscall.Rlimit{
+			Max: 0,
+			Cur: 0,
+		},
 		alarmSeconds: timeLimit + 5,
 	}, nil
 }
@@ -239,7 +257,7 @@ func prepareChildExecSpec(setting *TaskConfig) (childExecSpec, error) {
 		return childExecSpec{}, err
 	}
 
-	env, err := syscall.SlicePtrFromStrings(os.Environ())
+	env, err := syscall.SlicePtrFromStrings(BuildMinimalEnv())
 	if err != nil {
 		return childExecSpec{}, err
 	}
@@ -348,6 +366,12 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.hardMemoryLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitAddressSpace, errno)
 	}
+	if errno := setResourceLimit(syscall.RLIMIT_NOFILE, &spec.noFileLimit); errno != 0 {
+		reportChildStartupFailure(pipeWriteFD, childStageLimitOpenFiles, errno)
+	}
+	if errno := setResourceLimit(syscall.RLIMIT_CORE, &spec.coreLimit); errno != 0 {
+		reportChildStartupFailure(pipeWriteFD, childStageLimitCore, errno)
+	}
 	if errno := dupToStandardFD(spec.io.stdin, syscall.Stdin); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageDupStdin, errno)
 	}
@@ -357,6 +381,9 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 	if errno := dupToStandardFD(spec.io.stderr, syscall.Stderr); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageDupStderr, errno)
 	}
+	if errno := rawSetpgid(0, 0); errno != 0 {
+		reportChildStartupFailure(pipeWriteFD, childStageSetProcessGroup, errno)
+	}
 
 	if failure := applySandboxInChild(spec.sandbox); failure.failed() {
 		reportChildStartupFailure(pipeWriteFD, failure.stage, failure.errno)
@@ -365,11 +392,20 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 		reportChildStartupFailure(pipeWriteFD, childStagePtraceTraceme, errno)
 	}
 
+	var argvPtr uintptr
+	if len(spec.exec.argv) > 0 {
+		argvPtr = uintptr(unsafe.Pointer(&spec.exec.argv[0]))
+	}
+	var envPtr uintptr
+	if len(spec.exec.env) > 0 {
+		envPtr = uintptr(unsafe.Pointer(&spec.exec.env[0]))
+	}
+
 	_, _, errno := syscall.RawSyscall(
 		syscall.SYS_EXECVE,
 		uintptr(unsafe.Pointer(spec.exec.path)),
-		uintptr(unsafe.Pointer(&spec.exec.argv[0])),
-		uintptr(unsafe.Pointer(&spec.exec.env[0])),
+		argvPtr,
+		envPtr,
 	)
 	reportChildStartupFailure(pipeWriteFD, childStageExec, errno)
 }
@@ -416,6 +452,11 @@ func rawSetrlimit(resource int, limit *syscall.Rlimit) syscall.Errno {
 		0,
 		0,
 	)
+	return errno
+}
+
+func rawSetpgid(pid int, pgid int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETPGID, uintptr(pid), uintptr(pgid), 0)
 	return errno
 }
 

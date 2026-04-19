@@ -52,6 +52,8 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	const (
 		wantStackLimit      = uint64(8) << 20
 		wantHardMemoryLimit = uint64(96) << 20
+		wantNoFileLimit     = uint64(16)
+		wantCoreLimit       = uint64(0)
 	)
 
 	if spec.stackLimit.Cur != wantStackLimit || spec.stackLimit.Max != wantStackLimit {
@@ -74,6 +76,24 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	}
 	if spec.hardMemoryLimit.Cur == (uint64(64) << 20) {
 		t.Fatalf("prepareChildProcessSpec() hardMemoryLimit should include MemoryReserve, got %d", spec.hardMemoryLimit.Cur)
+	}
+	if spec.noFileLimit.Cur != wantNoFileLimit || spec.noFileLimit.Max != wantNoFileLimit {
+		t.Fatalf(
+			"prepareChildProcessSpec() noFileLimit = {Cur:%d Max:%d}, want {Cur:%d Max:%d}",
+			spec.noFileLimit.Cur,
+			spec.noFileLimit.Max,
+			wantNoFileLimit,
+			wantNoFileLimit,
+		)
+	}
+	if spec.coreLimit.Cur != wantCoreLimit || spec.coreLimit.Max != wantCoreLimit {
+		t.Fatalf(
+			"prepareChildProcessSpec() coreLimit = {Cur:%d Max:%d}, want {Cur:%d Max:%d}",
+			spec.coreLimit.Cur,
+			spec.coreLimit.Max,
+			wantCoreLimit,
+			wantCoreLimit,
+		)
 	}
 }
 

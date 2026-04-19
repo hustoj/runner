@@ -213,6 +213,9 @@ func (process *Process) Kill() {
 	}
 	log.Debugf("kill, %#v", process.Rusage)
 	process.IsKilled = true
+	// The launcher places the child into its own process group before exec, so
+	// a negative PID targets the entire sandboxed tree in one shot.
+	_ = syscall.Kill(-process.Pid, syscall.SIGKILL)
 	for pid := range process.tracees {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}

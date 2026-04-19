@@ -9,6 +9,16 @@ import (
 	"github.com/hustoj/runner/sec"
 )
 
+func (tracer *TracerDetect) setInSyscall(pid int, inSyscall bool) {
+	state := tracer.ensureTracee(pid)
+	state.inSyscall = inSyscall
+}
+
+func (tracer *TracerDetect) inSyscall(pid int) bool {
+	state, ok := tracer.getTracee(pid)
+	return ok && state.inSyscall
+}
+
 func getName(syscallID uint64) string {
 	name, err := sec.SCTbl.GetName(int(syscallID))
 	if err != nil {
@@ -17,15 +27,20 @@ func getName(syscallID uint64) string {
 	return name
 }
 
-func (tracer *TracerDetect) checkSyscall() bool {
+func (tracer *TracerDetect) checkSyscall(pid int) bool {
+	state, ok := tracer.getTracee(pid)
+	if !ok {
+		log.Warnf("checkSyscall called for unregistered pid %d", pid)
+		return true
+	}
 	var regs syscall.PtraceRegs
-	err := syscall.PtraceGetRegs(tracer.Pid, &regs)
+	err := syscall.PtraceGetRegs(pid, &regs)
 	if err != nil {
 		log.Debugf("trace failed: %v", err)
 		return true
 	}
 
-	if !tracer.inSyscall {
+	if !tracer.inSyscall(pid) {
 		log.Debugf(">>Name %16v", getName(regs.Orig_rax))
 
 		if !tracer.callPolicy.CheckID(regs.Orig_rax) {
@@ -37,16 +52,16 @@ func (tracer *TracerDetect) checkSyscall() bool {
 		}
 	} else {
 		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
-			if tracer.prevRax != regs.Orig_rax {
+			if state.prevRax != regs.Orig_rax {
 				log.Debugf(">>Name %16v", getName(regs.Orig_rax))
 			}
 			log.Infof("%16X", regs.Rax)
 		}
 	}
-	tracer.prevRax = regs.Orig_rax
-	if tracer.prevRax == syscall.SYS_EXIT_GROUP {
+	state.prevRax = regs.Orig_rax
+	if state.prevRax == syscall.SYS_EXIT_GROUP {
 		log.Debugf("SYS_EXIT_GROUP")
 	}
-	tracer.inSyscall = !tracer.inSyscall
+	tracer.setInSyscall(pid, !tracer.inSyscall(pid))
 	return false
 }

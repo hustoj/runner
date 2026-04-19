@@ -167,7 +167,7 @@ func (task *RunningTask) runProcess() bool {
 		return false
 	}
 
-	task.process = &Process{Pid: pid}
+	task.process = NewProcess(pid)
 	log.Debugf("child pid is %d", pid)
 	return true
 }

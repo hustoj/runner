@@ -23,3 +23,22 @@ func TestConsumeBootstrapCallConsumesExecveQuota(t *testing.T) {
 
 	assert.False(t, tracer.callPolicy.CheckID(uint64(syscall.SYS_EXECVE)))
 }
+
+func TestTracerDetectTracksTraceeStatePerPid(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+	tracer.RegisterTracee(101, true)
+
+	assert.True(t, tracer.HasTracee(100))
+	assert.True(t, tracer.ConsumeAttachStop(101, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
+	assert.False(t, tracer.ConsumeAttachStop(101, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
+	assert.False(t, tracer.ConsumeAttachStop(100, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
+	assert.False(t, tracer.ConsumeAttachStop(102, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
+
+	tracer.setInSyscall(100, true)
+	tracer.FinishPtraceEvent(100)
+	assert.False(t, tracer.inSyscall(100))
+
+	tracer.RemoveTracee(101)
+	assert.False(t, tracer.HasTracee(101))
+}

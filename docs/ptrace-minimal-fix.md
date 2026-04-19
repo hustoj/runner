@@ -1,4 +1,6 @@
-# ptrace 最小修复说明
+# ptrace 多 tracee 演进说明
+
+> 文件名仍保留为 `ptrace-minimal-fix.md`，用于承接早期修复背景；当前内容已经覆盖后续的多 tracee 演进。
 
 ## 背景
 
@@ -33,23 +35,23 @@
 - [runner/process_linux.go](runner/process_linux.go)
 - [runner/sec.go](runner/sec.go)
 
-## 为什么这是“最小修复”
+## 当前实现边界
 
-这个补丁只解决当前确认存在的绕过面，不改变整体架构：
+当前实现已经在原有最小修复基础上继续向前推进了一步：
 
 1. 仍然使用 ptrace 做 syscall 过滤。
-2. 仍然只跟踪单个 pid 的主流程。
-3. 不处理更完整的 ptrace event 模型，比如 `PTRACE_EVENT_CLONE`、`PTRACE_EVENT_FORK`、`PTRACE_EVENT_EXEC`。
+2. 已经开始跟踪 `clone/fork/vfork` 自动附着出来的 tracee，并为每个 tracee 分别维护 syscall enter/exit 相位。
+3. 主循环不再只围绕单个 pid `Wait4`，而是会消费父进程 event-stop 和新子进程的 attach-stop。
 
-也就是说，这个补丁的目标是把“任意真实 `SIGTRAP` 都会拨动状态机”的问题先关掉，而不是一次性把 runner 升级成完整的 ptrace 监控器。
+也就是说，runner 现在不再局限于“只跟踪单个 pid 的主流程”，但它仍然不是一个通用调试器，也还没有把所有 ptrace event 和资源统计语义都做到完全精细化。
 
 ## 剩余风险
 
 这个最小修复之后，仍然有几类问题没有从根上解决：
 
 1. 过滤逻辑仍在用户态，复杂度和性能都不如 seccomp-bpf。
-2. 当前 `Wait4` 仍然围绕单个 pid 设计，不适合扩展到线程和 fork 后代的完整跟踪。
-3. 如果后续要支持更复杂的 trace event，仍然需要把 stop 分类重构成显式状态机，而不是继续堆条件分支。
+2. 多 tracee 下的资源统计仍然是“按 thread group 去重采样内存 + 按 tracee 汇总 rusage”的近似模型，不是完整的进程树资源审计。
+3. 如果后续要支持更复杂的 ptrace event（例如更细的 exec / seccomp 联动），仍然需要继续把 stop 分类收敛成更显式的状态机，而不是继续堆条件分支。
 
 ## 后续建议
 

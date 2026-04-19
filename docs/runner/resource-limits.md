@@ -40,7 +40,8 @@
 
 ### CPU
 
-- 判题口径：`utime + stime`
+- 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值
+- 这表示“总消耗 CPU”，不是 wall-clock 时间；多线程并行时，该值可能明显大于实际经过时间
 - 结果判定：超过 `CPU` 后记为 `TIME_LIMIT`
 - 内核兜底：
   - `RLIMIT_CPU.Cur = CPU + 1`
@@ -50,8 +51,8 @@
 ### Memory
 
 - 判题口径：
-  - `PeakMemory`：`/proc/<pid>/status` 中的 `VmHWM`
-  - `RusageMemory`：`wait4(...).ru_maxrss`
+  - `PeakMemory`：按 thread group 去重后汇总 `/proc/<pid>/status` 中的 `VmHWM`
+  - `RusageMemory`：按 thread group 分组后，取每组 `wait4(...).ru_maxrss` 的最大值，再对各组求和
 - 两者都按 `KB` 记录，且都偏向 RSS / 常驻内存口径
 - 结果判定：
   - `PeakMemory > Memory`

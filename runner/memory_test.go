@@ -36,3 +36,46 @@ VmRSS:      5640 kB
 		t.Errorf("PeakMemory parse failed, %d", ret)
 	}
 }
+
+func Test_parseThreadGroupID(t *testing.T) {
+	fileContent := `
+Name: main
+Tgid:  4242
+Pid:   4242
+`
+	ret, err := parseThreadGroupID(fileContent)
+	if err != nil {
+		t.Fatalf("parseThreadGroupID failed: %v", err)
+	}
+	if ret != 4242 {
+		t.Fatalf("parseThreadGroupID returned %d", ret)
+	}
+}
+
+func Test_parseMemoryInfo(t *testing.T) {
+	fileContent := `
+Name: main
+Tgid:  4242
+VmHWM: 1234 kB
+`
+	info, err := parseMemoryInfo(fileContent)
+	if err != nil {
+		t.Fatalf("parseMemoryInfo failed: %v", err)
+	}
+	if info.ThreadGroup != 4242 {
+		t.Fatalf("parseMemoryInfo thread group = %d", info.ThreadGroup)
+	}
+	if info.PeakMemory != 1234 {
+		t.Fatalf("parseMemoryInfo peak memory = %d", info.PeakMemory)
+	}
+}
+
+func Test_parseStatusFieldRequiresColon(t *testing.T) {
+	value, ok := parseStatusField("TgidExtra: 99\nTgid: 42\n", "Tgid")
+	if !ok {
+		t.Fatal("parseStatusField should find Tgid")
+	}
+	if value != "42" {
+		t.Fatalf("parseStatusField returned %q", value)
+	}
+}

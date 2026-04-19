@@ -46,10 +46,8 @@ func (task *RunningTask) trace() {
 	process := task.process
 	process.IsKilled = false
 
-	tracer := TracerDetect{
-		Pid:     task.process.Pid,
-		prevRax: 0,
-	}
+	tracer := TracerDetect{}
+	tracer.RegisterTracee(task.process.Pid, false)
 
 	allowedCalls := make([]string, 0, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))
 	allowedCalls = append(allowedCalls, task.setting.AllowedCalls...)
@@ -58,9 +56,14 @@ func (task *RunningTask) trace() {
 	tracer.setCallPolicy(makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls))
 	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
 
-	process.Wait()
+	if !process.Wait() {
+		task.check()
+		return
+	}
 	if process.Exited() {
 		log.Infof("program exited before tracing loop")
+		tracer.RemoveTracee(process.CurrentPid)
+		process.RemoveTracee(process.CurrentPid)
 		task.parseRunningInfo()
 		task.applyExitCode(process.Status)
 		task.check()
@@ -86,21 +89,52 @@ func (task *RunningTask) trace() {
 		return
 	}
 
-	for {
-		process.Wait()
+	for process.Wait() {
 
 		if process.Exited() {
-			log.Infof("program exited! %v", process.Status.StopSignal())
+			log.Infof("program exited! pid=%d", process.CurrentPid)
+			tracer.RemoveTracee(process.CurrentPid)
+			process.RemoveTracee(process.CurrentPid)
 			task.parseRunningInfo()
 			task.applyExitCode(process.Status)
-			break
+			if !process.HasActiveTracees() {
+				break
+			}
+			continue
+		}
+		if tracer.ConsumeAttachStop(process.CurrentPid, process.Status) {
+			if err := process.SetPtraceOptions(); err != nil {
+				log.Infof("PtraceSetOptions(new child): err %v", err)
+				task.Result.RetCode = RUNTIME_ERROR
+				process.Kill()
+				task.parseRunningInfo()
+				break
+			}
+			if !process.Continue() {
+				log.Infof("Program not alive after child attach stop")
+				task.parseRunningInfo()
+				break
+			}
+			continue
+		}
+		if process.IsPtraceEventStop() {
+			tracer.FinishPtraceEvent(process.CurrentPid)
+			if !task.handlePtraceEvent(process, &tracer) {
+				break
+			}
+			if !process.Continue() {
+				log.Infof("Program not alive after ptrace event")
+				task.parseRunningInfo()
+				break
+			}
+			continue
 		}
 		if !process.IsSyscallStop() {
 			task.handleBrokenTraceStop("unexpected non-syscall ptrace stop")
 			break
 		}
 
-		if tracer.checkSyscall() {
+		if tracer.checkSyscall(process.CurrentPid) {
 			log.Debugf("------- check syscall failed")
 			process.Kill()
 			task.Result.RetCode = RUNTIME_ERROR
@@ -117,6 +151,26 @@ func (task *RunningTask) trace() {
 
 	}
 	task.check()
+}
+
+func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetect) bool {
+	switch process.PtraceEvent() {
+	case ptraceEventClone, ptraceEventFork, ptraceEventVFork:
+		newPid, err := process.GetEventPid()
+		if err != nil {
+			log.Infof("PtraceGetEventMsg failed: %v", err)
+			task.Result.RetCode = RUNTIME_ERROR
+			process.Kill()
+			task.parseRunningInfo()
+			return false
+		}
+		process.AddTracee(newPid)
+		tracer.RegisterTracee(newPid, true)
+		log.Infof("registered traced child pid=%d from event=%d", newPid, process.PtraceEvent())
+	default:
+		log.Warnf("unhandled ptrace event %d on pid=%d", process.PtraceEvent(), process.CurrentPid)
+	}
+	return true
 }
 
 func (task *RunningTask) handleBrokenTraceStop(reason string) {
@@ -207,17 +261,40 @@ func (task *RunningTask) refreshTimeCost() {
 }
 
 func (task *RunningTask) refreshMemory() {
-	memory, err := GetProcMemory(task.process.Pid)
-	if err != nil {
-		log.Infof("Get status memory failed: %v", err)
-	} else {
-		log.Debugf("peak memory is: %d", memory)
-		if memory > task.Result.PeakMemory {
-			task.Result.PeakMemory = memory
+	peakMemory := int64(0)
+	seenThreadGroups := make(map[int]struct{})
+	for _, pid := range task.process.ActivePids() {
+		info, err := GetProcMemoryInfo(pid)
+		if err != nil {
+			if cachedGroup, ok := task.process.ThreadGroup(pid); ok {
+				if _, seen := seenThreadGroups[cachedGroup]; !seen {
+					memory, fallbackErr := GetProcMemory(cachedGroup)
+					if fallbackErr == nil {
+						seenThreadGroups[cachedGroup] = struct{}{}
+						peakMemory += memory
+						continue
+					}
+				}
+			}
+			log.Infof("Get status memory failed for pid %d: %v", pid, err)
+			continue
+		}
+		task.process.SetThreadGroup(pid, info.ThreadGroup)
+		tgid := info.ThreadGroup
+		if _, seen := seenThreadGroups[tgid]; seen {
+			continue
+		}
+		seenThreadGroups[tgid] = struct{}{}
+		peakMemory += info.PeakMemory
+	}
+	if peakMemory > 0 {
+		log.Debugf("peak memory across tracees is: %d", peakMemory)
+		if peakMemory > task.Result.PeakMemory {
+			task.Result.PeakMemory = peakMemory
 		}
 	}
 
-	memory = task.process.Memory()
+	memory := task.process.Memory()
 	log.Debugf("rusage memory is: %d", memory)
 	if memory > task.Result.RusageMemory {
 		task.Result.RusageMemory = memory

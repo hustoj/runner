@@ -219,12 +219,14 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 }
 
 func prepareChildExecSpec(setting *TaskConfig) (childExecSpec, error) {
-	path, err := syscall.BytePtrFromString(setting.GetCommand())
+	command := setting.GetCommand()
+
+	path, err := syscall.BytePtrFromString(command)
 	if err != nil {
 		return childExecSpec{}, err
 	}
 
-	argv, err := syscall.SlicePtrFromStrings(setting.GetArgs())
+	argv, err := syscall.SlicePtrFromStrings(append([]string{command}, setting.GetArgs()...))
 	if err != nil {
 		return childExecSpec{}, err
 	}

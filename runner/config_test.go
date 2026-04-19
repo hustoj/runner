@@ -94,6 +94,44 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 	}
 }
 
+func TestParseCommandFallbackUsesFields(t *testing.T) {
+	tc := &TaskConfig{Command: "  /usr/bin/java   Main  "}
+	if got := tc.GetCommand(); got != "/usr/bin/java" {
+		t.Fatalf("GetCommand() = %q, want %q", got, "/usr/bin/java")
+	}
+	args := tc.GetArgs()
+	if len(args) != 1 || args[0] != "Main" {
+		t.Fatalf("GetArgs() = %v, want [Main]", args)
+	}
+}
+
+func TestParseCommandExplicitArgsTakesPrecedence(t *testing.T) {
+	tc := &TaskConfig{Command: "/usr/bin/java", Args: []string{"-Xmx128m", "Main"}}
+	if got := tc.GetCommand(); got != "/usr/bin/java" {
+		t.Fatalf("GetCommand() = %q, want %q", got, "/usr/bin/java")
+	}
+	args := tc.GetArgs()
+	want := []string{"-Xmx128m", "Main"}
+	if len(args) != len(want) {
+		t.Fatalf("GetArgs() = %v, want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("GetArgs()[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+func TestParseCommandSimpleDefault(t *testing.T) {
+	tc := &TaskConfig{Command: "./main"}
+	if got := tc.GetCommand(); got != "./main" {
+		t.Fatalf("GetCommand() = %q, want %q", got, "./main")
+	}
+	if args := tc.GetArgs(); len(args) != 0 {
+		t.Fatalf("GetArgs() = %v, want empty", args)
+	}
+}
+
 func preserveConfigTestGlobals() func() {
 	previousLog := log
 	previousSetting := setting

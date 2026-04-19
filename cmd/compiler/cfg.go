@@ -17,7 +17,7 @@ type CompileConfig struct {
 }
 
 func (config *CompileConfig) GetArgs() []string {
-	return strings.Split(config.Args, " ")
+	return strings.Fields(config.Args)
 }
 
 func loadConfig() *CompileConfig {

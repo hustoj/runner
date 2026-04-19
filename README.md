@@ -20,7 +20,22 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
     make testall # will check exception detect is ok, should all passed
     ```
 
-4. Install docker
+4. install and enable pre-commit hooks
+
+    ```sh
+    pipx install pre-commit
+    make pre-commit-install
+    ```
+
+    run all checks manually before commit:
+
+    ```sh
+    make pre-commit-run
+    ```
+
+    the same checks also run automatically in GitHub Actions for pushes to `main` / `master` and for pull requests.
+
+5. Install docker
 
     if you instal debian series
     `https://docs.docker.com/install/linux/docker-ce/ubuntu/`
@@ -28,7 +43,7 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
     or centos
     `https://docs.docker.com/install/linux/docker-ce/centos/`
 
-5. build docker image
+6. build docker image
 
     ```bash
     make build-docker-compiler

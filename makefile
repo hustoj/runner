@@ -1,5 +1,7 @@
 MAKEFLAGS += -s
 
+.PHONY: default image compiler build-docker-runner build-docker-compiler prepare testall pre-commit-install pre-commit-run clean
+
 default:
 	go build -o bin/runner ./cmd/runner
 
@@ -18,6 +20,12 @@ build-docker-compiler:
 
 prepare:
 	go build -o bin/test ./cmd/test
+
+pre-commit-install:
+	pre-commit install
+
+pre-commit-run:
+	pre-commit run --all-files
 
 testall: prepare
 	cd tests/general;make

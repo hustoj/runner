@@ -3,78 +3,84 @@
 package runner
 
 import (
+	"strings"
+	"syscall"
 	"testing"
 )
 
-func TestSandboxConfig_Validation(t *testing.T) {
+func TestValidateSandboxCredentialConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     SandboxConfig
+		uid     int
+		gid     int
 		wantErr bool
 		errMsg  string
 	}{
 		{
-			name: "both uid and gid negative - skip privileges drop",
-			cfg: SandboxConfig{
-				UID: -1,
-				GID: -1,
-			},
+			name:    "both negative disables privilege drop",
+			uid:     -1,
+			gid:     -1,
 			wantErr: false,
 		},
 		{
-			name: "only uid set - error",
-			cfg: SandboxConfig{
-				UID: 1000,
-				GID: -1,
-			},
+			name:    "only uid set",
+			uid:     1000,
+			gid:     -1,
 			wantErr: true,
 			errMsg:  "must be configured together",
 		},
 		{
-			name: "only gid set - error",
-			cfg: SandboxConfig{
-				UID: -1,
-				GID: 1000,
-			},
+			name:    "only gid set",
+			uid:     -1,
+			gid:     1000,
 			wantErr: true,
 			errMsg:  "must be configured together",
+		},
+		{
+			name:    "both set",
+			uid:     1000,
+			gid:     1000,
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := dropPrivileges(tt.cfg)
+			err := validateSandboxCredentialConfig(tt.uid, tt.gid)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("dropPrivileges() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				t.Fatalf("validateSandboxCredentialConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil && tt.errMsg != "" {
-				if !contains(err.Error(), tt.errMsg) {
-					t.Errorf("dropPrivileges() error = %v, want error containing %q", err, tt.errMsg)
-				}
+			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Fatalf("validateSandboxCredentialConfig() error = %v, want %q", err, tt.errMsg)
 			}
 		})
 	}
 }
 
-func TestSetupNamespaces_FlagCombination(t *testing.T) {
+func TestNamespaceFlagsForConfig(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     SandboxConfig
-		wantErr bool
-		errMsg  string
+		name      string
+		cfg       SandboxConfig
+		wantFlags int
+		wantErr   bool
+		errMsg    string
 	}{
 		{
-			name:    "no namespaces",
-			cfg:     SandboxConfig{},
-			wantErr: false,
+			name:      "no namespaces",
+			cfg:       SandboxConfig{},
+			wantFlags: 0,
+			wantErr:   false,
 		},
 		{
-			name: "mount namespace only",
+			name: "combined flags",
 			cfg: SandboxConfig{
 				UseMountNS: true,
+				UseIPCNS:   true,
+				UseUTSNS:   true,
+				UseNetNS:   true,
 			},
-			wantErr: true,
+			wantFlags: syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNET,
+			wantErr:   false,
 		},
 		{
 			name: "pid namespace unsupported",
@@ -88,119 +94,149 @@ func TestSetupNamespaces_FlagCombination(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := setupNamespaces(tt.cfg)
+			flags, err := namespaceFlagsForConfig(tt.cfg)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("setupNamespaces() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("namespaceFlagsForConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
-				t.Errorf("setupNamespaces() error = %v, want error containing %q", err, tt.errMsg)
-			}
-		})
-	}
-}
-
-func TestPrepareChildSandboxSpec_RejectsPIDNamespace(t *testing.T) {
-	_, err := prepareChildSandboxSpec(SandboxConfig{UsePIDNS: true})
-	if err == nil {
-		t.Fatal("prepareChildSandboxSpec() should reject UsePIDNS")
-	}
-	if !contains(err.Error(), "UsePIDNS is not supported") {
-		t.Fatalf("prepareChildSandboxSpec() error = %v, want unsupported pid namespace message", err)
-	}
-}
-
-func TestSetupRootFS_PathHandling(t *testing.T) {
-	tests := []struct {
-		name      string
-		cfg       SandboxConfig
-		wantChdir bool
-	}{
-		{
-			name:      "no chroot, no workdir",
-			cfg:       SandboxConfig{},
-			wantChdir: false,
-		},
-		{
-			name: "no chroot, with workdir",
-			cfg: SandboxConfig{
-				WorkDir: "/tmp",
-			},
-			wantChdir: true,
-		},
-		{
-			name: "with chroot, no workdir",
-			cfg: SandboxConfig{
-				ChrootDir: "/some/dir",
-			},
-			wantChdir: false, // would chdir to / after chroot, but chroot will fail
-		},
-		{
-			name: "with chroot and workdir",
-			cfg: SandboxConfig{
-				ChrootDir: "/some/dir",
-				WorkDir:   "/app",
-			},
-			wantChdir: false, // chroot will fail without root
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Similar to namespace test, we can only verify logic not actual syscalls
-			// setupRootFS will fail if it tries to chroot without privileges
-			err := setupRootFS(tt.cfg)
-			if tt.cfg.ChrootDir != "" {
-				// Expect error when trying to chroot without root
-				if err == nil {
-					t.Error("setupRootFS() should fail when trying to chroot without root privileges")
+			if err != nil {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Fatalf("namespaceFlagsForConfig() error = %v, want %q", err, tt.errMsg)
 				}
+				return
+			}
+			if flags != tt.wantFlags {
+				t.Fatalf("namespaceFlagsForConfig() flags = %#x, want %#x", flags, tt.wantFlags)
 			}
 		})
 	}
 }
 
-func TestSetNoNewPrivs(t *testing.T) {
+func TestBytePtrOrNil(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     SandboxConfig
+		value   string
+		wantNil bool
 		wantErr bool
 	}{
 		{
-			name: "disabled",
-			cfg: SandboxConfig{
-				NoNewPrivs: false,
-			},
+			name:    "empty string",
+			value:   "",
+			wantNil: true,
 			wantErr: false,
 		},
 		{
-			name: "enabled",
-			cfg: SandboxConfig{
-				NoNewPrivs: true,
-			},
-			wantErr: false, // PR_SET_NO_NEW_PRIVS doesn't require privileges
+			name:    "normal path",
+			value:   "/tmp",
+			wantNil: false,
+			wantErr: false,
+		},
+		{
+			name:    "nul byte rejected",
+			value:   "/tmp\x00broken",
+			wantNil: true,
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := setNoNewPrivs(tt.cfg)
+			ptr, err := bytePtrOrNil(tt.value)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("setNoNewPrivs() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("bytePtrOrNil() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if (ptr == nil) != tt.wantNil {
+				t.Fatalf("bytePtrOrNil() nil = %v, wantNil %v", ptr == nil, tt.wantNil)
 			}
 		})
 	}
 }
 
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
+func TestPrepareChildSandboxSpec(t *testing.T) {
+	cfg := SandboxConfig{
+		UID:        1000,
+		GID:        1001,
+		ChrootDir:  "/srv/root",
+		WorkDir:    "/work",
+		NoNewPrivs: true,
+		UseMountNS: true,
+		UseIPCNS:   true,
+	}
+
+	spec, err := prepareChildSandboxSpec(cfg)
+	if err != nil {
+		t.Fatalf("prepareChildSandboxSpec() error = %v", err)
+	}
+
+	if spec.uid != cfg.UID || spec.gid != cfg.GID {
+		t.Fatalf("prepareChildSandboxSpec() credentials = (%d,%d), want (%d,%d)", spec.uid, spec.gid, cfg.UID, cfg.GID)
+	}
+	if !spec.noNewPrivs {
+		t.Fatal("prepareChildSandboxSpec() should preserve no_new_privs")
+	}
+	wantFlags := syscall.CLONE_NEWNS | syscall.CLONE_NEWIPC
+	if spec.namespaceFlags != wantFlags {
+		t.Fatalf("prepareChildSandboxSpec() flags = %#x, want %#x", spec.namespaceFlags, wantFlags)
+	}
+	if spec.chrootDir == nil {
+		t.Fatal("prepareChildSandboxSpec() should populate chrootDir")
+	}
+	if spec.workDir == nil {
+		t.Fatal("prepareChildSandboxSpec() should populate workDir")
+	}
 }
 
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestPrepareChildSandboxSpecRejectsInvalidConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    SandboxConfig
+		errMsg string
+	}{
+		{
+			name: "pid namespace unsupported",
+			cfg: SandboxConfig{
+				UsePIDNS: true,
+			},
+			errMsg: "UsePIDNS is not supported",
+		},
+		{
+			name: "credential mismatch",
+			cfg: SandboxConfig{
+				UID: 1000,
+				GID: -1,
+			},
+			errMsg: "must be configured together",
+		},
+		{
+			name: "invalid chroot path",
+			cfg: SandboxConfig{
+				ChrootDir: "/root\x00bad",
+			},
+			errMsg: "invalid argument",
+		},
 	}
-	return false
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := prepareChildSandboxSpec(tt.cfg)
+			if err == nil {
+				t.Fatal("prepareChildSandboxSpec() should fail")
+			}
+			if !strings.Contains(err.Error(), tt.errMsg) {
+				t.Fatalf("prepareChildSandboxSpec() error = %v, want %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestApplySandboxCredentialsRejectsInvalidSpec(t *testing.T) {
+	failure := applySandboxCredentials(childSandboxSpec{uid: 1000, gid: -1})
+	if !failure.failed() {
+		t.Fatal("applySandboxCredentials() should reject invalid credential spec")
+	}
+	if failure.stage != childStageSandboxInvalidCredentials {
+		t.Fatalf("applySandboxCredentials() stage = %v, want %v", failure.stage, childStageSandboxInvalidCredentials)
+	}
+	if failure.errno != syscall.EINVAL {
+		t.Fatalf("applySandboxCredentials() errno = %v, want %v", failure.errno, syscall.EINVAL)
+	}
 }

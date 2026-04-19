@@ -49,7 +49,7 @@
 建议做法：
 
 1. 保留当前最小修复后的 ptrace 初始化流程。
-2. 在子进程完成 namespace、rootfs、no_new_privs、dropPrivileges 之后安装 seccomp 过滤器。
+2. 在子进程完成 namespace、rootfs、no_new_privs、凭证切换之后安装 seccomp 过滤器。
 3. seccomp 规则负责稳定的 runtime allowlist，例如 `read`、`write`、`mmap`、`brk`、`exit_group` 这类通用 syscall。
 4. ptrace 暂时只处理两类场景：
    - bootstrap `execve` 的边界语义
@@ -122,15 +122,15 @@
 
 1. `limitResource()`
 2. `redirectIO()`
-3. `setupNamespaces()`
-4. `setupRootFS()`
-5. `setNoNewPrivs()`
-6. `dropPrivileges()`
+3. namespace 阶段
+4. rootfs 阶段
+5. no_new_privs 阶段
+6. 凭证切换阶段（`setgroups` → `setgid` → `setuid`）
 7. `installSeccomp()`
 8. `ptraceTraceme()` 或等价的迁移期观测逻辑
 9. `execve()`
 
-这里把 `installSeccomp()` 放在 `dropPrivileges()` 之后，是为了避免过滤器误伤前置的特权 syscall。
+这里把 `installSeccomp()` 放在凭证切换之后，是为了避免过滤器误伤前置的特权 syscall。
 
 ## 测试计划
 

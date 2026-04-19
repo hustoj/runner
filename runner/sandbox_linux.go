@@ -50,60 +50,101 @@ type childSandboxSpec struct {
 }
 
 func prepareChildSandboxSpec(cfg SandboxConfig) (childSandboxSpec, error) {
-	if cfg.UsePIDNS {
-		return childSandboxSpec{}, fmt.Errorf("UsePIDNS is not supported by the current launcher: PID namespaces require an extra fork after unshare(CLONE_NEWPID)")
+	if err := validateSandboxCredentialConfig(cfg.UID, cfg.GID); err != nil {
+		return childSandboxSpec{}, err
+	}
+
+	namespaceFlags, err := namespaceFlagsForConfig(cfg)
+	if err != nil {
+		return childSandboxSpec{}, err
 	}
 
 	spec := childSandboxSpec{
-		uid:        cfg.UID,
-		gid:        cfg.GID,
-		noNewPrivs: cfg.NoNewPrivs,
+		uid:            cfg.UID,
+		gid:            cfg.GID,
+		noNewPrivs:     cfg.NoNewPrivs,
+		namespaceFlags: namespaceFlags,
 	}
 
-	if cfg.UseMountNS {
-		spec.namespaceFlags |= syscall.CLONE_NEWNS
-	}
-	if cfg.UseIPCNS {
-		spec.namespaceFlags |= syscall.CLONE_NEWIPC
-	}
-	if cfg.UseUTSNS {
-		spec.namespaceFlags |= syscall.CLONE_NEWUTS
-	}
-	if cfg.UseNetNS {
-		spec.namespaceFlags |= syscall.CLONE_NEWNET
+	spec.chrootDir, err = bytePtrOrNil(cfg.ChrootDir)
+	if err != nil {
+		return childSandboxSpec{}, err
 	}
 
-	if cfg.ChrootDir != "" {
-		path, err := syscall.BytePtrFromString(cfg.ChrootDir)
-		if err != nil {
-			return childSandboxSpec{}, err
-		}
-		spec.chrootDir = path
-	}
-
-	if cfg.WorkDir != "" {
-		path, err := syscall.BytePtrFromString(cfg.WorkDir)
-		if err != nil {
-			return childSandboxSpec{}, err
-		}
-		spec.workDir = path
+	spec.workDir, err = bytePtrOrNil(cfg.WorkDir)
+	if err != nil {
+		return childSandboxSpec{}, err
 	}
 
 	return spec, nil
 }
 
 func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
-	if spec.namespaceFlags != 0 {
-		if errno := rawUnshare(spec.namespaceFlags); errno != 0 {
-			return childStartupFailure{stage: childStageSandboxNamespaces, errno: errno}
-		}
+	if failure := applySandboxNamespaces(spec); failure.failed() {
+		return failure
 	}
-	if spec.uid >= 0 || spec.gid >= 0 {
-		if spec.uid < 0 || spec.gid < 0 {
-			return childStartupFailure{stage: childStageSandboxInvalidCredentials, errno: syscall.EINVAL}
-		}
+	if failure := applySandboxRootFS(spec); failure.failed() {
+		return failure
+	}
+	if failure := applySandboxNoNewPrivs(spec); failure.failed() {
+		return failure
+	}
+	if failure := applySandboxCredentials(spec); failure.failed() {
+		return failure
 	}
 
+	return childStartupFailure{}
+}
+
+func validateSandboxCredentialConfig(uid, gid int) error {
+	if uid < 0 && gid < 0 {
+		return nil
+	}
+	if uid < 0 || gid < 0 {
+		return fmt.Errorf("sandbox uid/gid must be configured together (got uid=%d, gid=%d)", uid, gid)
+	}
+	return nil
+}
+
+func namespaceFlagsForConfig(cfg SandboxConfig) (int, error) {
+	if cfg.UsePIDNS {
+		return 0, fmt.Errorf("UsePIDNS is not supported by the current launcher: PID namespaces require an extra fork after unshare(CLONE_NEWPID)")
+	}
+
+	flags := 0
+	if cfg.UseMountNS {
+		flags |= syscall.CLONE_NEWNS
+	}
+	if cfg.UseIPCNS {
+		flags |= syscall.CLONE_NEWIPC
+	}
+	if cfg.UseUTSNS {
+		flags |= syscall.CLONE_NEWUTS
+	}
+	if cfg.UseNetNS {
+		flags |= syscall.CLONE_NEWNET
+	}
+	return flags, nil
+}
+
+func bytePtrOrNil(value string) (*byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	return syscall.BytePtrFromString(value)
+}
+
+func applySandboxNamespaces(spec childSandboxSpec) childStartupFailure {
+	if spec.namespaceFlags == 0 {
+		return childStartupFailure{}
+	}
+	if errno := rawUnshare(spec.namespaceFlags); errno != 0 {
+		return childStartupFailure{stage: childStageSandboxNamespaces, errno: errno}
+	}
+	return childStartupFailure{}
+}
+
+func applySandboxRootFS(spec childSandboxSpec) childStartupFailure {
 	if spec.chrootDir != nil {
 		if errno := rawChroot(spec.chrootDir); errno != 0 {
 			return childStartupFailure{stage: childStageSandboxChroot, errno: errno}
@@ -116,19 +157,32 @@ func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
 				return childStartupFailure{stage: childStageSandboxChdirWorkDir, errno: errno}
 			}
 		}
-	} else if spec.workDir != nil {
+		return childStartupFailure{}
+	}
+
+	if spec.workDir != nil {
 		if errno := rawChdir(spec.workDir); errno != 0 {
 			return childStartupFailure{stage: childStageSandboxChdirWorkDir, errno: errno}
 		}
 	}
+	return childStartupFailure{}
+}
 
-	if spec.noNewPrivs {
-		_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(prSetNoNewPrivs), 1, 0, 0, 0, 0)
-		if errno != 0 {
-			return childStartupFailure{stage: childStageSandboxNoNewPrivs, errno: errno}
-		}
+func applySandboxNoNewPrivs(spec childSandboxSpec) childStartupFailure {
+	if !spec.noNewPrivs {
+		return childStartupFailure{}
 	}
+	_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(prSetNoNewPrivs), 1, 0, 0, 0, 0)
+	if errno != 0 {
+		return childStartupFailure{stage: childStageSandboxNoNewPrivs, errno: errno}
+	}
+	return childStartupFailure{}
+}
 
+func applySandboxCredentials(spec childSandboxSpec) childStartupFailure {
+	if err := validateSandboxCredentialConfig(spec.uid, spec.gid); err != nil {
+		return childStartupFailure{stage: childStageSandboxInvalidCredentials, errno: syscall.EINVAL}
+	}
 	if spec.uid < 0 && spec.gid < 0 {
 		return childStartupFailure{}
 	}
@@ -143,7 +197,6 @@ func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
 	if errno := rawSetuid(spec.uid); errno != 0 {
 		return childStartupFailure{stage: childStageSandboxSetuid, errno: errno}
 	}
-
 	return childStartupFailure{}
 }
 
@@ -179,99 +232,4 @@ func rawSetgid(gid int) syscall.Errno {
 func rawSetuid(uid int) syscall.Errno {
 	_, _, errno := syscall.RawSyscall(syscall.SYS_SETUID, uintptr(uid), 0, 0)
 	return errno
-}
-
-func setupNamespaces(cfg SandboxConfig) error {
-	if cfg.UsePIDNS {
-		return fmt.Errorf("UsePIDNS is not supported by the current launcher: PID namespaces require an extra fork after unshare(CLONE_NEWPID)")
-	}
-
-	flags := 0
-	if cfg.UseMountNS {
-		flags |= syscall.CLONE_NEWNS
-	}
-	if cfg.UseIPCNS {
-		flags |= syscall.CLONE_NEWIPC
-	}
-	if cfg.UseUTSNS {
-		flags |= syscall.CLONE_NEWUTS
-	}
-	if cfg.UseNetNS {
-		flags |= syscall.CLONE_NEWNET
-	}
-	if flags == 0 {
-		return nil
-	}
-	if errno := rawUnshare(flags); errno != 0 {
-		return errno
-	}
-	return nil
-}
-
-// setupRootFS changes the root filesystem view for the child process.
-// If ChrootDir is set, chroots into that directory (requires CAP_SYS_CHROOT).
-// If WorkDir is set, changes to that directory.
-// Order: chroot first (changes root), then chdir to working directory.
-func setupRootFS(cfg SandboxConfig) error {
-	if cfg.ChrootDir == "" {
-		if cfg.WorkDir != "" {
-			return syscall.Chdir(cfg.WorkDir)
-		}
-		return nil
-	}
-
-	if err := syscall.Chroot(cfg.ChrootDir); err != nil {
-		return err
-	}
-	if err := syscall.Chdir("/"); err != nil {
-		return err
-	}
-	if cfg.WorkDir != "" && cfg.WorkDir != "/" {
-		return syscall.Chdir(cfg.WorkDir)
-	}
-	return nil
-}
-
-// setNoNewPrivs prevents the process and its children from gaining new privileges.
-// This blocks execve() of setuid/setgid binaries and similar privilege escalation vectors.
-// PR_SET_NO_NEW_PRIVS is one-way and inherited by children.
-// Must be called BEFORE dropping privileges (as it's irreversible).
-func setNoNewPrivs(cfg SandboxConfig) error {
-	if !cfg.NoNewPrivs {
-		return nil
-	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, uintptr(prSetNoNewPrivs), 1, 0, 0, 0, 0)
-	if errno != 0 {
-		return errno
-	}
-	return nil
-}
-
-// dropPrivileges drops to a non-privileged user account.
-// Order matters: setgroups → setgid → setuid (must be last as it cannot be reversed).
-// After setuid, the process cannot regain privileges.
-func dropPrivileges(cfg SandboxConfig) error {
-	if cfg.UID < 0 && cfg.GID < 0 {
-		// No privilege dropping requested
-		return nil
-	}
-	if cfg.UID < 0 || cfg.GID < 0 {
-		return fmt.Errorf("sandbox uid/gid must be configured together (got uid=%d, gid=%d)", cfg.UID, cfg.GID)
-	}
-	if cfg.UID < 0 || cfg.GID < 0 {
-		return fmt.Errorf("sandbox uid/gid cannot be negative (got uid=%d, gid=%d)", cfg.UID, cfg.GID)
-	}
-	// Clear supplementary groups first
-	if err := syscall.Setgroups([]int{}); err != nil {
-		return fmt.Errorf("setgroups: %w", err)
-	}
-	// Set GID before UID (setuid is irreversible)
-	if err := syscall.Setgid(cfg.GID); err != nil {
-		return fmt.Errorf("setgid(%d): %w", cfg.GID, err)
-	}
-	// Set UID last - after this we lose all privileges
-	if err := syscall.Setuid(cfg.UID); err != nil {
-		return fmt.Errorf("setuid(%d): %w", cfg.UID, err)
-	}
-	return nil
 }

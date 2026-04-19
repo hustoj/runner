@@ -85,52 +85,45 @@ func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
 | no_new_privs | 降权 | 一旦设置不可撤销，降权前设置可防止意外提权 |
 | 降权 | 最后 | `setuid` 后失去所有特权，不能再做其他操作 |
 
-#### 3. 实现各子步骤
+#### 3. 实现各子阶段
 
 **降权（最核心）**：
 
 ```go
-func dropPrivileges(cfg SandboxConfig) error {
-    if cfg.UID < 0 && cfg.GID < 0 {
-        return nil  // 不需要降权
+func applySandboxCredentials(spec childSandboxSpec) childStartupFailure {
+    if spec.uid < 0 && spec.gid < 0 {
+        return childStartupFailure{}
     }
 
-    // 1. 清空附加组（防止通过组权限访问资源）
-    if err := syscall.Setgroups([]int{}); err != nil {
-        return err
+    if errno := rawClearGroups(); errno != 0 {
+        return childStartupFailure{stage: childStageSandboxSetgroups, errno: errno}
     }
-
-    // 2. 切换 GID
-    if err := syscall.Setgid(cfg.GID); err != nil {
-        return err
+    if errno := rawSetgid(spec.gid); errno != 0 {
+        return childStartupFailure{stage: childStageSandboxSetgid, errno: errno}
     }
-
-    // 3. 切换 UID（必须最后，不可逆）
-    if err := syscall.Setuid(cfg.UID); err != nil {
-        return err
+    if errno := rawSetuid(spec.uid); errno != 0 {
+        return childStartupFailure{stage: childStageSandboxSetuid, errno: errno}
     }
-
-    return nil
+    return childStartupFailure{}
 }
 ```
 
 **no_new_privs（防止提权）**：
 
 ```go
-func setNoNewPrivs(cfg SandboxConfig) error {
-    if !cfg.NoNewPrivs {
-        return nil
+func applySandboxNoNewPrivs(spec childSandboxSpec) childStartupFailure {
+    if !spec.noNewPrivs {
+        return childStartupFailure{}
     }
 
-    // PR_SET_NO_NEW_PRIVS = 38
     _, _, errno := syscall.Syscall6(
         syscall.SYS_PRCTL,
         38, 1, 0, 0, 0, 0,
     )
     if errno != 0 {
-        return errno
+        return childStartupFailure{stage: childStageSandboxNoNewPrivs, errno: errno}
     }
-    return nil
+    return childStartupFailure{}
 }
 ```
 

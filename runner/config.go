@@ -70,6 +70,17 @@ func (tc *TaskConfig) Validate() error {
 		return fmt.Errorf("runUID and runGID must both be set or both be -1 (got uid=%d, gid=%d)", tc.RunUID, tc.RunGID)
 	}
 
+	// Validate syscall names (platform-dependent; only effective on linux/amd64)
+	if err := validateSyscallNames("oneTimeCalls", tc.OneTimeCalls); err != nil {
+		return err
+	}
+	if err := validateSyscallNames("allowedCalls", tc.AllowedCalls); err != nil {
+		return err
+	}
+	if err := validateSyscallNames("additionCalls", tc.AdditionCalls); err != nil {
+		return err
+	}
+
 	return nil
 }
 

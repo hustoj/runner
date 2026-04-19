@@ -52,3 +52,33 @@ func TestApplyExitCodeDoesNotOverrideExistingResult(t *testing.T) {
 
 	assert.Equal(t, TIME_LIMIT, task.Result.RetCode)
 }
+
+func TestApplyTerminationSignalTreatsSIGKILLAsTimeLimitWhenOverTime(t *testing.T) {
+	InitLogger("/dev/null", false)
+
+	task := RunningTask{
+		Result:    &Result{},
+		timeLimit: 1_000_000,
+	}
+	task.Result.Init()
+	task.Result.TimeCost = 1_000_001
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, TIME_LIMIT, task.Result.RetCode)
+}
+
+func TestApplyTerminationSignalKeepsRuntimeErrorForSIGKILLWithinLimits(t *testing.T) {
+	InitLogger("/dev/null", false)
+
+	task := RunningTask{
+		Result:    &Result{},
+		timeLimit: 1_000_000,
+	}
+	task.Result.Init()
+	task.Result.TimeCost = 500_000
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
+}

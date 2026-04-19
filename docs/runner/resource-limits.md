@@ -45,8 +45,9 @@
 - 结果判定：超过 `CPU` 后记为 `TIME_LIMIT`
 - 内核兜底：
   - `RLIMIT_CPU.Cur = CPU + 1`
-  - `RLIMIT_CPU.Max = CPU + 3`
+  - `RLIMIT_CPU.Max = CPU + 1`
   - `alarm = CPU + 5`
+  - `Cur` 与 `Max` 保持一致，避免在默认允许 `prlimit64` 时被用户程序自行放宽 CPU 限制
 
 ### Memory
 
@@ -73,8 +74,9 @@
 
 - 内核兜底：
   - `RLIMIT_FSIZE.Cur = Output`
-  - `RLIMIT_FSIZE.Max = Output * 2`
+  - `RLIMIT_FSIZE.Max = Output`
 - `SIGXFSZ` 会被映射为 `OUTPUT_LIMIT`
+- `Cur` 与 `Max` 保持一致，避免用户程序通过 `prlimit64` 把输出上限抬高到更大的 hard limit
 
 ## 4. 为什么 `MemoryReserve` 用固定余量
 

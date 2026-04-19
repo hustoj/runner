@@ -50,12 +50,32 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	defer closeChildIOFiles(spec.io)
 
 	const (
+		wantCPULimit        = uint64(3)
 		wantStackLimit      = uint64(8) << 20
 		wantHardMemoryLimit = uint64(96) << 20
+		wantOutputLimit     = uint64(16) << 20
 		wantNoFileLimit     = uint64(16)
 		wantCoreLimit       = uint64(0)
 	)
 
+	if spec.cpuLimit.Cur != wantCPULimit || spec.cpuLimit.Max != wantCPULimit {
+		t.Fatalf(
+			"prepareChildProcessSpec() cpuLimit = {Cur:%d Max:%d}, want {Cur:%d Max:%d}",
+			spec.cpuLimit.Cur,
+			spec.cpuLimit.Max,
+			wantCPULimit,
+			wantCPULimit,
+		)
+	}
+	if spec.outputLimit.Cur != wantOutputLimit || spec.outputLimit.Max != wantOutputLimit {
+		t.Fatalf(
+			"prepareChildProcessSpec() outputLimit = {Cur:%d Max:%d}, want {Cur:%d Max:%d}",
+			spec.outputLimit.Cur,
+			spec.outputLimit.Max,
+			wantOutputLimit,
+			wantOutputLimit,
+		)
+	}
 	if spec.stackLimit.Cur != wantStackLimit || spec.stackLimit.Max != wantStackLimit {
 		t.Fatalf(
 			"prepareChildProcessSpec() stackLimit = {Cur:%d Max:%d}, want {Cur:%d Max:%d}",

@@ -208,18 +208,20 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 	timeLimit := uint64(task.setting.CPU)
 	stackLimit := uint64(task.setting.Stack) << 20
 	hardMemoryLimit := (uint64(task.setting.Memory) + uint64(task.setting.MemoryReserve)) << 20
+	enforcedCPULimit := timeLimit + 1
+	enforcedOutputLimit := uint64(task.setting.Output) << 20
 
 	return childProcessSpec{
 		io:      ioFiles,
 		exec:    execSpec,
 		sandbox: sandboxSpec,
 		cpuLimit: syscall.Rlimit{
-			Max: timeLimit + 3,
-			Cur: timeLimit + 1,
+			Max: enforcedCPULimit,
+			Cur: enforcedCPULimit,
 		},
 		outputLimit: syscall.Rlimit{
-			Max: uint64(task.setting.Output) << 21,
-			Cur: uint64(task.setting.Output) << 20,
+			Max: enforcedOutputLimit,
+			Cur: enforcedOutputLimit,
 		},
 		stackLimit: syscall.Rlimit{
 			Max: stackLimit,

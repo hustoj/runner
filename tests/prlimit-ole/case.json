@@ -1,0 +1,8 @@
+{
+  "Name": "prlimit64 should not widen output limit",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 32,
+  "Output": 1,
+  "Result": 9
+}

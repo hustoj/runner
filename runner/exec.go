@@ -195,7 +195,13 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 
 func (task *RunningTask) handleBrokenTraceStop(reason string) {
 	process := task.process
-	log.Infof("%s: %v", reason, process.Status.StopSignal())
+	if process.Status.Stopped() {
+		log.Infof("%s: stop signal %v", reason, process.Status.StopSignal())
+	} else if process.Status.Signaled() {
+		log.Infof("%s: exit signal %v", reason, process.Status.Signal())
+	} else {
+		log.Infof("%s", reason)
+	}
 	task.parseRunningInfo()
 	if process.Status.Stopped() {
 		task.Result.detectSignal(process.Status.StopSignal())
@@ -225,6 +231,16 @@ func (task *RunningTask) applyExitCode(status syscall.WaitStatus) {
 func (task *RunningTask) applyTerminationSignal(signal os.Signal) {
 	if !task.Result.isAccept() {
 		return
+	}
+	if signal == syscall.SIGKILL {
+		if task.outOfTime() {
+			task.Result.RetCode = TIME_LIMIT
+			return
+		}
+		if task.outOfMemory() {
+			task.Result.RetCode = MEMORY_LIMIT
+			return
+		}
 	}
 	task.Result.detectSignal(signal)
 }

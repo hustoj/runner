@@ -43,6 +43,7 @@ testall: prepare
 	cd tests/tle2;make
 	cd tests/zero;make
 	cd tests/ole;make
+	cd tests/prlimit-ole;make
 	cd tests/java;make
 	cd tests/java-tle;make
 	cd tests/java-mle;make

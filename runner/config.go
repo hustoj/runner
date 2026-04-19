@@ -10,10 +10,11 @@ import (
 
 type TaskConfig struct {
 	// Resource limits
-	CPU    int `default:"3"`   // CPU time limit in seconds
-	Memory int `default:"256"` // Memory limit in MB
-	Output int `default:"16"`  // Output size limit in MB
-	Stack  int `default:"8"`   // Stack size limit in MB
+	CPU           int `default:"3"`   // CPU time limit in seconds
+	Memory        int `default:"256"` // Judged memory limit in MB
+	MemoryReserve int `default:"32"`  // Extra MB reserved for RLIMIT_DATA / RLIMIT_AS
+	Output        int `default:"16"`  // Output size limit in MB
+	Stack         int `default:"8"`   // Stack size limit in MB
 
 	// Sandbox security settings
 	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
@@ -47,9 +48,25 @@ const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop 
 // Validate checks if the configuration is valid.
 // Returns an error if any required constraints are violated.
 func (tc *TaskConfig) Validate() error {
+	if tc.CPU < 0 {
+		return fmt.Errorf("cpu must be >= 0 (got %d)", tc.CPU)
+	}
+	if tc.Memory < 0 {
+		return fmt.Errorf("memory must be >= 0 (got %d)", tc.Memory)
+	}
+	if tc.MemoryReserve < 0 {
+		return fmt.Errorf("memoryReserve must be >= 0 (got %d)", tc.MemoryReserve)
+	}
+	if tc.Output < 0 {
+		return fmt.Errorf("output must be >= 0 (got %d)", tc.Output)
+	}
+	if tc.Stack < 0 {
+		return fmt.Errorf("stack must be >= 0 (got %d)", tc.Stack)
+	}
+
 	// Check UID/GID pairing
 	if (tc.RunUID >= 0 && tc.RunGID < 0) || (tc.RunUID < 0 && tc.RunGID >= 0) {
-		return fmt.Errorf("RunUID and RunGID must both be set or both be -1 (got uid=%d, gid=%d)", tc.RunUID, tc.RunGID)
+		return fmt.Errorf("runUID and runGID must both be set or both be -1 (got uid=%d, gid=%d)", tc.RunUID, tc.RunGID)
 	}
 
 	return nil

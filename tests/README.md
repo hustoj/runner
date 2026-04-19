@@ -4,7 +4,7 @@
 
 ## 用例结构
 
-- `case.json`：运行配置与预期结果，字段定义对应 [`../runner/config.go`](../runner/config.go)
+- `case.json`：运行配置与预期结果，字段定义对应 [`../runner/config.go`](../runner/config.go)，资源限制语义补充见 [`../docs/runner/resource-limits.md`](../docs/runner/resource-limits.md)
 - 源码文件：如 `main.c`、`Main.java`、`thread.cpp`
 - `makefile`：编译样例并调用 `bin/test` 或相关入口做验证
 

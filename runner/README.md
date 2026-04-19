@@ -23,6 +23,13 @@
 - `result.go`：评测状态码及 signal 到状态码的映射。
 - `*_darwin.go`：macOS 占位实现，方便开发时通过编译，但不提供真正的 Linux 沙箱语义。
 
+## 资源限制契约
+
+- `Memory` 是判题内存上限，按 Linux 上的 RSS 类指标判定。
+- `MemoryReserve` 是给 `RLIMIT_DATA` / `RLIMIT_AS` 的固定余量，用来避免地址空间硬限制过早把结果打成 `RE`。
+- `Stack` 独立映射到 `RLIMIT_STACK`，不再与 `Memory` 复用同一上限。
+- 更完整的字段语义、单位和 signal 归类说明见 [`../docs/runner/resource-limits.md`](../docs/runner/resource-limits.md)。
+
 ## 常见检索入口
 
 - 想新增 `case.json` 配置项：先看 `config.go`

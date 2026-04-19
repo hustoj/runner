@@ -3,5 +3,6 @@
   "verbose": true,
   "CPU": 10,
   "Memory": 10,
+  "Stack": 8,
   "Result": 10
 }

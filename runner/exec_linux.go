@@ -104,13 +104,14 @@ type childExecSpec struct {
 }
 
 type childProcessSpec struct {
-	io           childIOFiles
-	exec         childExecSpec
-	sandbox      childSandboxSpec
-	cpuLimit     syscall.Rlimit
-	outputLimit  syscall.Rlimit
-	memoryLimit  syscall.Rlimit
-	alarmSeconds uint64
+	io              childIOFiles
+	exec            childExecSpec
+	sandbox         childSandboxSpec
+	cpuLimit        syscall.Rlimit
+	outputLimit     syscall.Rlimit
+	stackLimit      syscall.Rlimit
+	hardMemoryLimit syscall.Rlimit
+	alarmSeconds    uint64
 }
 
 func ptraceTraceme() syscall.Errno {
@@ -190,7 +191,8 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 	}
 
 	timeLimit := uint64(task.setting.CPU)
-	memoryLimit := uint64(task.memoryLimit<<10) * 4
+	stackLimit := uint64(task.setting.Stack) << 20
+	hardMemoryLimit := (uint64(task.setting.Memory) + uint64(task.setting.MemoryReserve)) << 20
 
 	return childProcessSpec{
 		io:      ioFiles,
@@ -201,12 +203,16 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 			Cur: timeLimit + 1,
 		},
 		outputLimit: syscall.Rlimit{
-			Max: uint64(task.setting.Output << 21),
-			Cur: uint64(task.setting.Output << 20),
+			Max: uint64(task.setting.Output) << 21,
+			Cur: uint64(task.setting.Output) << 20,
 		},
-		memoryLimit: syscall.Rlimit{
-			Max: memoryLimit + 5<<20,
-			Cur: memoryLimit,
+		stackLimit: syscall.Rlimit{
+			Max: stackLimit,
+			Cur: stackLimit,
+		},
+		hardMemoryLimit: syscall.Rlimit{
+			Max: hardMemoryLimit,
+			Cur: hardMemoryLimit,
 		},
 		alarmSeconds: timeLimit + 5,
 	}, nil
@@ -323,13 +329,13 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 	if errno := setResourceLimit(syscall.RLIMIT_FSIZE, &spec.outputLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitFileSize, errno)
 	}
-	if errno := setResourceLimit(syscall.RLIMIT_STACK, &spec.memoryLimit); errno != 0 {
+	if errno := setResourceLimit(syscall.RLIMIT_STACK, &spec.stackLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitStack, errno)
 	}
-	if errno := setResourceLimit(syscall.RLIMIT_DATA, &spec.memoryLimit); errno != 0 {
+	if errno := setResourceLimit(syscall.RLIMIT_DATA, &spec.hardMemoryLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitData, errno)
 	}
-	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.memoryLimit); errno != 0 {
+	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.hardMemoryLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitAddressSpace, errno)
 	}
 	if errno := dupToStandardFD(spec.io.stdin, syscall.Stdin); errno != 0 {

@@ -1,4 +1,4 @@
-//go:build !(linux && amd64)
+//go:build !(linux && (amd64 || arm64))
 
 package sec
 
@@ -13,11 +13,11 @@ var SCTbl *SCTable
 func (t *SCTable) Init() {}
 
 func (t *SCTable) GetName(callID int) (string, error) {
-	return "", fmt.Errorf("syscall table is only available on linux/amd64")
+	return "", fmt.Errorf("syscall table is only available on linux/amd64 or linux/arm64")
 }
 
 func (t *SCTable) GetID(callName string) (int, error) {
-	return -1, fmt.Errorf("syscall table is only available on linux/amd64")
+	return -1, fmt.Errorf("syscall table is only available on linux/amd64 or linux/arm64")
 }
 
 func init() {

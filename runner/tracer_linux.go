@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package runner
 
@@ -40,26 +40,28 @@ func (tracer *TracerDetect) checkSyscall(pid int) bool {
 		return true
 	}
 
-	if !tracer.inSyscall(pid) {
-		log.Debugf(">>Name %16v", getName(regs.Orig_rax))
+	callID := getSyscallNumber(&regs)
 
-		if !tracer.callPolicy.CheckID(regs.Orig_rax) {
-			log.Infof("not allowed syscall %d: %16v ", regs.Orig_rax, getName(regs.Orig_rax))
+	if !tracer.inSyscall(pid) {
+		log.Debugf(">>Name %16v", getName(callID))
+
+		if !tracer.callPolicy.CheckID(callID) {
+			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
 			return true
 		}
-		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
-			log.Info(getName(regs.Orig_rax))
+		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
+			log.Info(getName(callID))
 		}
 	} else {
-		if regs.Orig_rax != syscall.SYS_WRITE && regs.Orig_rax != syscall.SYS_READ {
-			if state.prevRax != regs.Orig_rax {
-				log.Debugf(">>Name %16v", getName(regs.Orig_rax))
+		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
+			if state.prevSyscall != callID {
+				log.Debugf(">>Name %16v", getName(callID))
 			}
-			log.Infof("%16X", regs.Rax)
+			log.Infof("%16X", getSyscallReturn(&regs))
 		}
 	}
-	state.prevRax = regs.Orig_rax
-	if state.prevRax == syscall.SYS_EXIT_GROUP {
+	state.prevSyscall = callID
+	if state.prevSyscall == syscall.SYS_EXIT_GROUP {
 		log.Debugf("SYS_EXIT_GROUP")
 	}
 	tracer.setInSyscall(pid, !tracer.inSyscall(pid))

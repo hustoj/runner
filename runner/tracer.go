@@ -4,7 +4,7 @@ import "syscall"
 
 type traceeState struct {
 	inSyscall         bool
-	prevRax           uint64 //nolint:unused // accessed in tracer_linux.go
+	prevSyscall       uint64 //nolint:unused // accessed in tracer_linux.go
 	pendingAttachStop bool
 }
 

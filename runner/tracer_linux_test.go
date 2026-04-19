@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package runner
 
@@ -18,7 +18,9 @@ func TestConsumeBootstrapCallConsumesExecveQuota(t *testing.T) {
 	allowedCalls := []string{}
 	tracer := &TracerDetect{}
 
-	tracer.setCallPolicy(makeCallPolicy(&oneTimeCalls, &allowedCalls))
+	policy, err := makeCallPolicy(&oneTimeCalls, &allowedCalls)
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
 	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
 
 	assert.False(t, tracer.callPolicy.CheckID(uint64(syscall.SYS_EXECVE)))

@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 
 	"github.com/hustoj/runner/runner"
 )
@@ -21,6 +22,8 @@ const (
 	compileExitSetupFailure = 125
 	compileExitExecFailure  = 126
 )
+
+var compilerSetitimer = unix.Setitimer
 
 func initLog(m *CompileConfig) {
 	var err error
@@ -56,10 +59,14 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
 		return err
 	}
-	if _, _, errno := syscall.Syscall(syscall.SYS_ALARM, uintptr(cpu*3+2), 0, 0); errno != 0 {
-		return errno
-	}
-	return nil
+	return setCompileAlarm(cpu)
+}
+
+func setCompileAlarm(cpu uint64) error {
+	_, err := compilerSetitimer(unix.ITIMER_REAL, unix.Itimerval{
+		Value: unix.Timeval{Sec: int64(cpu*3 + 2)},
+	})
+	return err
 }
 
 func doCompile(cfg *CompileConfig) error {

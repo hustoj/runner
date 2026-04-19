@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hustoj/runner/runner"
+	"golang.org/x/sys/unix"
 )
 
 func TestResolveExecIncludesBinary(t *testing.T) {
@@ -158,5 +160,20 @@ func TestResolveExecReturnsErrorWhenCompilerBinaryMissing(t *testing.T) {
 	_, _, err := cfg.ResolveExec()
 	if err == nil {
 		t.Fatal("ResolveExec() should fail when compiler binary is missing")
+	}
+}
+
+func TestSetCompileAlarmPropagatesSetitimerError(t *testing.T) {
+	oldSetitimer := compilerSetitimer
+	compilerSetitimer = func(which unix.ItimerWhich, it unix.Itimerval) (unix.Itimerval, error) {
+		return unix.Itimerval{}, syscall.EINVAL
+	}
+	defer func() {
+		compilerSetitimer = oldSetitimer
+	}()
+
+	err := setCompileAlarm(1)
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("setCompileAlarm() error = %v, want %v", err, syscall.EINVAL)
 	}
 }

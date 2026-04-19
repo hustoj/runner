@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 type childStartupStage uint32
@@ -136,7 +138,15 @@ func ptraceTraceme() syscall.Errno {
 }
 
 func setAlarm(seconds uint64) syscall.Errno {
-	_, _, errno := syscall.RawSyscall(syscall.SYS_ALARM, uintptr(seconds), 0, 0)
+	timer := unix.Itimerval{
+		Value: unix.Timeval{Sec: int64(seconds)},
+	}
+	_, _, errno := syscall.RawSyscall(
+		syscall.SYS_SETITIMER,
+		uintptr(unix.ITIMER_REAL),
+		uintptr(unsafe.Pointer(&timer)),
+		0,
+	)
 	return errno
 }
 
@@ -422,13 +432,14 @@ func setResourceLimit(code int, limit *syscall.Rlimit) syscall.Errno {
 }
 
 func dupToStandardFD(sourceFD int, targetFD int) syscall.Errno {
-	_, _, errno := syscall.RawSyscall(syscall.SYS_DUP2, uintptr(sourceFD), uintptr(targetFD), 0)
+	if sourceFD == targetFD {
+		return 0
+	}
+	_, _, errno := syscall.RawSyscall(syscall.SYS_DUP3, uintptr(sourceFD), uintptr(targetFD), 0)
 	if errno != 0 {
 		return errno
 	}
-	if sourceFD != targetFD {
-		rawClose(sourceFD)
-	}
+	rawClose(sourceFD)
 	return 0
 }
 

@@ -12,8 +12,10 @@ import (
 )
 
 func fileDup(f1 *os.File, f2 *os.File) {
-	syscall.Dup2(int(f1.Fd()), int(f2.Fd()))
-	f1.Close()
+	if int(f1.Fd()) != int(f2.Fd()) {
+		_ = syscall.Dup3(int(f1.Fd()), int(f2.Fd()), 0)
+	}
+	_ = f1.Close()
 }
 
 func fileDupErr(f1 *os.File, f2 *os.File) error {
@@ -108,14 +110,6 @@ func openFileNoFollow(filename string, flags int, perm uint32) (*os.File, error)
 		return nil, fmt.Errorf("new file for %s returned nil", filename)
 	}
 	return file, nil
-}
-
-func fork() (int, syscall.Errno) {
-	r1, _, errno := syscall.RawSyscall(syscall.SYS_FORK, 0, 0, 0)
-	if errno != 0 || r1 < 0 {
-		return -1, errno
-	}
-	return int(r1), 0
 }
 
 func ChangeRunningUser(user int) error {

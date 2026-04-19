@@ -38,7 +38,7 @@ type TaskConfig struct {
 	UseNetNS   bool     `default:"false"` // Isolate network stack
 
 	OneTimeCalls  []string `default:"execve"`
-	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,exit,readlink,readlinkat,access,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
+	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
 	AdditionCalls []string `default:""`
 	Verbose       bool     `default:"false"`
 	Name          string
@@ -172,6 +172,10 @@ func LoadConfig() (*TaskConfig, error) {
 	cfg := new(TaskConfig)
 	if err := m.Load(cfg); err != nil {
 		return nil, err
+	}
+
+	if extra := platformDefaultCalls(); len(extra) > 0 {
+		cfg.AllowedCalls = append(cfg.AllowedCalls, extra...)
 	}
 
 	if err := cfg.Validate(); err != nil {

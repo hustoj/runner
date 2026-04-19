@@ -24,7 +24,7 @@ type TaskConfig struct {
 	ChrootDir  string `default:""`      // Chroot jail directory (empty = no chroot)
 	NoNewPrivs bool   `default:"true"`  // Prevent privilege escalation via setuid binaries
 	UseMountNS bool   `default:"false"` // Isolate mount points
-	UsePIDNS   bool   `default:"false"` // Isolate process IDs
+	UsePIDNS   bool   `default:"false"` // Reserved: current launcher cannot realize PID namespaces without an extra fork
 	UseIPCNS   bool   `default:"false"` // Isolate IPC resources
 	UseUTSNS   bool   `default:"false"` // Isolate hostname/domainname
 	UseNetNS   bool   `default:"false"` // Isolate network stack

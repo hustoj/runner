@@ -5,7 +5,7 @@
 ### ✅ 优点
 
 1. **职责收敛清晰**
-   - 把散落的降权逻辑统一到 `applySandbox()` 单一入口
+   - 把散落的降权逻辑收敛到固定的 child sandbox 路径
    - 各子步骤职责明确：namespace、rootfs、no_new_privs、drop privileges
 
 2. **执行顺序正确**
@@ -22,11 +22,11 @@
 
 ---
 
-## 解决方案：统一沙箱入口
+## 解决方案：固定沙箱路径
 
 ### 设计原则
 
-**核心思想**：把安全步骤从"散落的可选 helper"改成"主路径强制执行"
+**核心思想**：父进程先完成参数预计算，子进程只执行固定顺序的 raw syscall 沙箱步骤
 
 ```
 Before:
@@ -34,8 +34,10 @@ fork() → limitResource() → redirectIO() → ptraceTraceme() → exec()
          ❌ 没有任何降权/隔离
 
 After:
-fork() → limitResource() → redirectIO() → applySandbox() → ptraceTraceme() → exec()
-                                            ✅ 统一安全入口
+prepareChildSandboxSpec()
+fork()
+child: limitResource() → redirectIO() → applySandboxInChild() → ptraceTraceme() → execve()
+                                    ✅ 固定 child sandbox 路径
 ```
 
 ### 实现要点
@@ -59,31 +61,18 @@ type SandboxConfig struct {
 }
 ```
 
-#### 2. 定义执行顺序
+#### 2. 定义 child sandbox 顺序
 
 ```go
-func applySandbox(cfg SandboxConfig) error {
-    // 步骤1: 创建 namespace (需要特权)
-    if err := setupNamespaces(cfg); err != nil {
-        return err
+func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
+    if spec.namespaceFlags != 0 {
+        if errno := rawUnshare(spec.namespaceFlags); errno != 0 {
+            return childStartupFailure{stage: childStageSandboxNamespaces, errno: errno}
+        }
     }
 
-    // 步骤2: 切换 rootfs (需要 CAP_SYS_CHROOT)
-    if err := setupRootFS(cfg); err != nil {
-        return err
-    }
-
-    // 步骤3: 设置 no_new_privs (不可逆)
-    if err := setNoNewPrivs(cfg); err != nil {
-        return err
-    }
-
-    // 步骤4: 降权 (不可逆)
-    if err := dropPrivileges(cfg); err != nil {
-        return err
-    }
-
-    return nil
+    // rootfs → no_new_privs → setgroups → setgid → setuid
+    ...
 }
 ```
 
@@ -147,46 +136,27 @@ func setNoNewPrivs(cfg SandboxConfig) error {
 
 **namespace 隔离**：
 
-```go
-func setupNamespaces(cfg SandboxConfig) error {
-    flags := 0
-    if cfg.UseMountNS { flags |= syscall.CLONE_NEWNS }
-    if cfg.UsePIDNS   { flags |= syscall.CLONE_NEWPID }
-    if cfg.UseIPCNS   { flags |= syscall.CLONE_NEWIPC }
-    if cfg.UseUTSNS   { flags |= syscall.CLONE_NEWUTS }
-    if cfg.UseNetNS   { flags |= syscall.CLONE_NEWNET }
-
-    if flags == 0 {
-        return nil
-    }
-
-    return syscall.Unshare(flags)
-}
-```
+`UsePIDNS` 当前被显式拒绝，因为 `unshare(CLONE_NEWPID)` 后还需要再 `fork` 一次才能让后续进程进入新的 PID namespace；现有 launcher 还没有这个阶段。
 
 #### 4. 接入主执行路径
 
 ```go
 // 文件：runner/exec_linux.go
 
-func (task *RunningTask) runProcess() {
-    pid := fork()
-    if pid == 0 {
-        // 子进程
-        task.limitResource()
-        task.redirectIO()
-
-        // ✅ 新增：强制执行沙箱设置
-        if err := applySandbox(task.sandboxConfig()); err != nil {
-            // ⚠️ fork 后不能用 panic，只能用 syscall.Exit
-            fmt.Fprintf(os.Stderr, "Sandbox failed: %v\n", err)
-            syscall.Exit(1)
-        }
-
-        ptraceTraceme()
-        syscall.Exec(...)
+func (task *RunningTask) runProcess() bool {
+    spec, err := task.prepareChildProcessSpec()
+    if err != nil {
+        return false
     }
-    // 父进程继续...
+
+    pid, errno := fork()
+    if pid == 0 {
+        runChildProcess(spec, pipeReadFD, pipeWriteFD)
+    }
+
+    // 父进程通过 startup pipe 读取 childStartupFailure
+    ...
+    return true
 }
 ```
 
@@ -203,7 +173,7 @@ func (task *RunningTask) runProcess() {
 | **提权防护** | ❌ 无 | ✅ `no_new_privs` 阻止 setuid binary |
 | **文件系统** | 可见宿主机全部文件 | 可选 `chroot` 隔离 |
 | **挂载表** | 可见宿主机挂载 | 可选 mount namespace |
-| **进程树** | 可见所有进程 | 可选 PID namespace |
+| **进程树** | 可见所有进程 | 当前启动模型暂不支持 PID namespace |
 | **网络** | 可访问宿主网络 | 可选 network namespace |
 
 ### 配置灵活性
@@ -229,7 +199,6 @@ UseNetNS: false
   "WorkDir": "/judge",
   "ChrootDir": "/judge/root",
   "UseMountNS": true,
-  "UsePIDNS": true,
   "UseNetNS": true
 }
 ```
@@ -251,7 +220,7 @@ UseNetNS: false
 | 方案 | 核心思想 | 优点 | 缺点 | 适用场景 |
 |------|----------|------|------|----------|
 | **A. 散落 helper** | 提供可选的降权函数，调用方自己决定是否用 | 灵活 | ❌ 容易被遗忘<br>❌ 步骤不完整<br>❌ 顺序可能错误 | ❌ 不推荐 |
-| **B. 统一入口**<br>（当前方案） | 主路径强制调用 `applySandbox()`，步骤固定 | ✅ 不会被遗忘<br>✅ 顺序正确<br>✅ 简单易懂 | 扩展需修改代码 | ✅ **推荐** |
+| **B. 固定 child path**<br>（当前方案） | 父进程预计算，子进程执行固定 raw syscall 沙箱步骤 | ✅ 不会被遗忘<br>✅ 顺序正确<br>✅ 更符合 fork 后约束 | 需要维护 startup spec | ✅ **推荐** |
 | **C. 步骤链接口** | `SandboxStep` 接口，可插拔步骤 | 高度可扩展<br>符合开闭原则 | ❌ 过度设计<br>❌ 步骤顺序可能被错配 | 仅当需要频繁变更步骤时 |
 | **D. exec.Cmd** | 废弃 fork，改用 Go 标准库 | ✅ 解决 Go fork 问题<br>✅ 更符合 Go 习惯 | 大规模重构 | 长期目标 |
 
@@ -283,13 +252,13 @@ UseNetNS: false
 
 3. **⬆️ P2：引入 seccomp-bpf**
    ```go
-   func applySandbox(cfg SandboxConfig) error {
-       setupNamespaces(cfg)
-       setupRootFS(cfg)
-       setNoNewPrivs(cfg)
-       dropPrivileges(cfg)
-       installSeccomp(cfg)  // 新增：内核态 syscall 过滤
-       return nil
+   func runChildProcess(spec childProcessSpec, ...) {
+       ...
+       if failure := applySandboxInChild(spec.sandbox); failure.failed() {
+           reportChildStartupFailure(pipeWriteFD, failure.stage, failure.errno)
+       }
+       installSeccomp(spec.sandbox) // 新增：内核态 syscall 过滤
+       ...
    }
    ```
 
@@ -400,9 +369,9 @@ func ChangeRunningUser(uid int) { ... }
 
 ✅ **正确做法**：封装成必经入口，失败即退出
 ```go
-// 主路径强制调用 → 不会被遗忘
-if err := applySandbox(cfg); err != nil {
-    syscall.Exit(1)
+// 固定 child path → 不会被遗忘
+if failure := applySandboxInChild(spec); failure.failed() {
+    reportChildStartupFailure(pipeWriteFD, failure.stage, failure.errno)
 }
 ```
 

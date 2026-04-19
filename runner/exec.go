@@ -30,7 +30,9 @@ func (task *RunningTask) Run() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	// execute task
-	task.runProcess()
+	if !task.runProcess() {
+		return
+	}
 	task.trace()
 }
 

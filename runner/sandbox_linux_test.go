@@ -59,47 +59,53 @@ func TestSandboxConfig_Validation(t *testing.T) {
 
 func TestSetupNamespaces_FlagCombination(t *testing.T) {
 	tests := []struct {
-		name string
-		cfg  SandboxConfig
-		want int // expected flags combination (we can't test actual unshare without root)
+		name    string
+		cfg     SandboxConfig
+		wantErr bool
+		errMsg  string
 	}{
 		{
-			name: "no namespaces",
-			cfg:  SandboxConfig{},
-			want: 0,
+			name:    "no namespaces",
+			cfg:     SandboxConfig{},
+			wantErr: false,
 		},
 		{
 			name: "mount namespace only",
 			cfg: SandboxConfig{
 				UseMountNS: true,
 			},
-			want: 1,
+			wantErr: true,
 		},
 		{
-			name: "all namespaces",
+			name: "pid namespace unsupported",
 			cfg: SandboxConfig{
-				UseMountNS: true,
-				UsePIDNS:   true,
-				UseIPCNS:   true,
-				UseUTSNS:   true,
-				UseNetNS:   true,
+				UsePIDNS: true,
 			},
-			want: 5,
+			wantErr: true,
+			errMsg:  "UsePIDNS is not supported",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// We can only test the logic without root privileges
-			// Actual unshare would fail, so we just verify it doesn't panic
-			// and returns expected error for non-root users
 			err := setupNamespaces(tt.cfg)
-			if tt.want == 0 && err != nil {
-				t.Errorf("setupNamespaces() with no flags should succeed, got error: %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("setupNamespaces() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			// For non-zero flags, we expect EPERM when not root
-			// This is a weak test but better than nothing
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("setupNamespaces() error = %v, want error containing %q", err, tt.errMsg)
+			}
 		})
+	}
+}
+
+func TestPrepareChildSandboxSpec_RejectsPIDNamespace(t *testing.T) {
+	_, err := prepareChildSandboxSpec(SandboxConfig{UsePIDNS: true})
+	if err == nil {
+		t.Fatal("prepareChildSandboxSpec() should reject UsePIDNS")
+	}
+	if !contains(err.Error(), "UsePIDNS is not supported") {
+		t.Fatalf("prepareChildSandboxSpec() error = %v, want unsupported pid namespace message", err)
 	}
 }
 

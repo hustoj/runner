@@ -12,12 +12,12 @@ func fileDup(f1 *os.File, f2 *os.File) {
 	f1.Close()
 }
 
-func fork() int {
-	r1, _, errno := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0)
+func fork() (int, syscall.Errno) {
+	r1, _, errno := syscall.RawSyscall(syscall.SYS_FORK, 0, 0, 0)
 	if errno != 0 || r1 < 0 {
-		log.Panic("fork failed %v", errno)
+		return -1, errno
 	}
-	return int(r1)
+	return int(r1), 0
 }
 
 func ChangeRunningUser(user int) {

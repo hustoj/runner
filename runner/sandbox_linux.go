@@ -4,8 +4,8 @@ package runner
 
 import (
 	"fmt"
-	"os"
 	"syscall"
+	"unsafe"
 )
 
 const prSetNoNewPrivs = 38
@@ -40,41 +40,155 @@ func (task *RunningTask) sandboxConfig() SandboxConfig {
 	}
 }
 
-// applySandbox applies security isolation in a strict order.
-// Must be called in the child process BEFORE ptraceTraceme() and exec().
-//
-// Step order is critical:
-// 1. setupNamespaces - must happen before chroot (needs privileges)
-// 2. setupRootFS - must happen before dropping privileges (chroot needs CAP_SYS_CHROOT)
-// 3. setNoNewPrivs - must happen before dropping privileges (prevents re-gaining privs via setuid binaries)
-// 4. dropPrivileges - must be last (after this we cannot do any privileged operations)
-//
-// WARNING: This function is called after fork() in a Go program. Do NOT use
-// Go runtime features (goroutines, channels, certain stdlib functions) as the
-// runtime state may be inconsistent. Only use direct syscalls.
-func applySandbox(cfg SandboxConfig) error {
-	if err := setupNamespaces(cfg); err != nil {
-		return fmt.Errorf("setup namespaces: %w", err)
+type childSandboxSpec struct {
+	uid            int
+	gid            int
+	chrootDir      *byte
+	workDir        *byte
+	noNewPrivs     bool
+	namespaceFlags int
+}
+
+func prepareChildSandboxSpec(cfg SandboxConfig) (childSandboxSpec, error) {
+	if cfg.UsePIDNS {
+		return childSandboxSpec{}, fmt.Errorf("UsePIDNS is not supported by the current launcher: PID namespaces require an extra fork after unshare(CLONE_NEWPID)")
 	}
-	if err := setupRootFS(cfg); err != nil {
-		return fmt.Errorf("setup rootfs: %w", err)
+
+	spec := childSandboxSpec{
+		uid:        cfg.UID,
+		gid:        cfg.GID,
+		noNewPrivs: cfg.NoNewPrivs,
 	}
-	if err := setNoNewPrivs(cfg); err != nil {
-		return fmt.Errorf("set no_new_privs: %w", err)
+
+	if cfg.UseMountNS {
+		spec.namespaceFlags |= syscall.CLONE_NEWNS
 	}
-	if err := dropPrivileges(cfg); err != nil {
-		return fmt.Errorf("drop privileges: %w", err)
+	if cfg.UseIPCNS {
+		spec.namespaceFlags |= syscall.CLONE_NEWIPC
 	}
-	return nil
+	if cfg.UseUTSNS {
+		spec.namespaceFlags |= syscall.CLONE_NEWUTS
+	}
+	if cfg.UseNetNS {
+		spec.namespaceFlags |= syscall.CLONE_NEWNET
+	}
+
+	if cfg.ChrootDir != "" {
+		path, err := syscall.BytePtrFromString(cfg.ChrootDir)
+		if err != nil {
+			return childSandboxSpec{}, err
+		}
+		spec.chrootDir = path
+	}
+
+	if cfg.WorkDir != "" {
+		path, err := syscall.BytePtrFromString(cfg.WorkDir)
+		if err != nil {
+			return childSandboxSpec{}, err
+		}
+		spec.workDir = path
+	}
+
+	return spec, nil
+}
+
+func applySandboxInChild(spec childSandboxSpec) childStartupFailure {
+	if spec.namespaceFlags != 0 {
+		if errno := rawUnshare(spec.namespaceFlags); errno != 0 {
+			return childStartupFailure{stage: childStageSandboxNamespaces, errno: errno}
+		}
+	}
+	if spec.uid >= 0 || spec.gid >= 0 {
+		if spec.uid < 0 || spec.gid < 0 {
+			return childStartupFailure{stage: childStageSandboxInvalidCredentials, errno: syscall.EINVAL}
+		}
+	}
+
+	if spec.chrootDir != nil {
+		if errno := rawChroot(spec.chrootDir); errno != 0 {
+			return childStartupFailure{stage: childStageSandboxChroot, errno: errno}
+		}
+		if errno := rawChdir(rootDirPtr); errno != 0 {
+			return childStartupFailure{stage: childStageSandboxChdirRoot, errno: errno}
+		}
+		if spec.workDir != nil && spec.workDir != rootDirPtr {
+			if errno := rawChdir(spec.workDir); errno != 0 {
+				return childStartupFailure{stage: childStageSandboxChdirWorkDir, errno: errno}
+			}
+		}
+	} else if spec.workDir != nil {
+		if errno := rawChdir(spec.workDir); errno != 0 {
+			return childStartupFailure{stage: childStageSandboxChdirWorkDir, errno: errno}
+		}
+	}
+
+	if spec.noNewPrivs {
+		_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(prSetNoNewPrivs), 1, 0, 0, 0, 0)
+		if errno != 0 {
+			return childStartupFailure{stage: childStageSandboxNoNewPrivs, errno: errno}
+		}
+	}
+
+	if spec.uid < 0 && spec.gid < 0 {
+		return childStartupFailure{}
+	}
+	if errno := rawClearGroups(); errno != 0 {
+		return childStartupFailure{stage: childStageSandboxSetgroups, errno: errno}
+	}
+	// Do not use syscall.Setgid/Setuid here: on Linux they go through
+	// AllThreadsSyscall, which is unsafe after raw fork in a Go program.
+	if errno := rawSetgid(spec.gid); errno != 0 {
+		return childStartupFailure{stage: childStageSandboxSetgid, errno: errno}
+	}
+	if errno := rawSetuid(spec.uid); errno != 0 {
+		return childStartupFailure{stage: childStageSandboxSetuid, errno: errno}
+	}
+
+	return childStartupFailure{}
+}
+
+var rootDir = [...]byte{'/', 0}
+
+var rootDirPtr = &rootDir[0]
+
+func rawChroot(path *byte) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_CHROOT, uintptr(unsafe.Pointer(path)), 0, 0)
+	return errno
+}
+
+func rawChdir(path *byte) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_CHDIR, uintptr(unsafe.Pointer(path)), 0, 0)
+	return errno
+}
+
+func rawClearGroups() syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETGROUPS, 0, 0, 0)
+	return errno
+}
+
+func rawUnshare(flags int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_UNSHARE, uintptr(flags), 0, 0)
+	return errno
+}
+
+func rawSetgid(gid int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETGID, uintptr(gid), 0, 0)
+	return errno
+}
+
+func rawSetuid(uid int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETUID, uintptr(uid), 0, 0)
+	return errno
 }
 
 func setupNamespaces(cfg SandboxConfig) error {
+	if cfg.UsePIDNS {
+		return fmt.Errorf("UsePIDNS is not supported by the current launcher: PID namespaces require an extra fork after unshare(CLONE_NEWPID)")
+	}
+
 	flags := 0
 	if cfg.UseMountNS {
 		flags |= syscall.CLONE_NEWNS
-	}
-	if cfg.UsePIDNS {
-		flags |= syscall.CLONE_NEWPID
 	}
 	if cfg.UseIPCNS {
 		flags |= syscall.CLONE_NEWIPC
@@ -88,7 +202,10 @@ func setupNamespaces(cfg SandboxConfig) error {
 	if flags == 0 {
 		return nil
 	}
-	return syscall.Unshare(flags)
+	if errno := rawUnshare(flags); errno != 0 {
+		return errno
+	}
+	return nil
 }
 
 // setupRootFS changes the root filesystem view for the child process.
@@ -98,7 +215,7 @@ func setupNamespaces(cfg SandboxConfig) error {
 func setupRootFS(cfg SandboxConfig) error {
 	if cfg.ChrootDir == "" {
 		if cfg.WorkDir != "" {
-			return os.Chdir(cfg.WorkDir)
+			return syscall.Chdir(cfg.WorkDir)
 		}
 		return nil
 	}
@@ -106,11 +223,11 @@ func setupRootFS(cfg SandboxConfig) error {
 	if err := syscall.Chroot(cfg.ChrootDir); err != nil {
 		return err
 	}
-	if err := os.Chdir("/"); err != nil {
+	if err := syscall.Chdir("/"); err != nil {
 		return err
 	}
 	if cfg.WorkDir != "" && cfg.WorkDir != "/" {
-		return os.Chdir(cfg.WorkDir)
+		return syscall.Chdir(cfg.WorkDir)
 	}
 	return nil
 }

@@ -1,5 +1,9 @@
 # Created by .ignore support plugin (hsz.mobi)
 ### Go template
+# Build output
+bin/
+tests/java/hs_err_pid*.log
+
 # Binaries for programs and plugins
 *.exe
 *.exe~

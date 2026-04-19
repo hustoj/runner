@@ -38,7 +38,7 @@ type TaskConfig struct {
 	UseNetNS   bool     `default:"false"` // Isolate network stack
 
 	OneTimeCalls  []string `default:"execve"`
-	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,readlink,access,mprotect"`
+	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,arch_prctl,exit_group,exit,readlink,readlinkat,access,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
 	AdditionCalls []string `default:""`
 	Verbose       bool     `default:"false"`
 	Name          string

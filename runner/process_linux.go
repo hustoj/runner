@@ -21,12 +21,16 @@ func waitOptions() int {
 }
 
 func (process *Process) Continue() bool {
+	return process.ContinueWithSignal(0)
+}
+
+func (process *Process) ContinueWithSignal(sig int) bool {
 	if process.IsKilled {
 		return false
 	}
-	err := syscall.PtraceSyscall(process.CurrentPid, 0)
+	err := syscall.PtraceSyscall(process.CurrentPid, sig)
 	if err != nil {
-		log.Infof("PtraceSyscall: err %v", err)
+		log.Infof("PtraceSyscall(sig=%d): err %v", sig, err)
 		return false
 	}
 	return true

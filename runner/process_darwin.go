@@ -18,6 +18,10 @@ func (process *Process) Continue() bool {
 	panic("Process.Continue is not supported on darwin")
 }
 
+func (process *Process) ContinueWithSignal(_ int) bool {
+	panic("Process.ContinueWithSignal is not supported on darwin")
+}
+
 func (process *Process) IsInitialTraceStop() bool {
 	panic("Process.IsInitialTraceStop is not supported on darwin")
 }

@@ -96,7 +96,11 @@ func (task *RunningTask) trace() {
 			tracer.RemoveTracee(process.CurrentPid)
 			process.RemoveTracee(process.CurrentPid)
 			task.parseRunningInfo()
-			task.applyExitCode(process.Status)
+			// Only the root process exit code determines the result; child threads
+			// (e.g. JVM daemon threads) may legitimately exit with non-zero codes.
+			if process.CurrentPid == process.Pid {
+				task.applyExitCode(process.Status)
+			}
 			if !process.HasActiveTracees() {
 				break
 			}
@@ -130,6 +134,22 @@ func (task *RunningTask) trace() {
 			continue
 		}
 		if !process.IsSyscallStop() {
+			// Signal-delivery stop: forward the signal so the process can handle it.
+			// This is required for runtimes like the JVM that use SIGSEGV internally.
+			// If the process has no handler, it will be killed by the signal and the
+			// subsequent Signaled() status is caught on the next Wait iteration.
+			if process.Status.Stopped() {
+				sig := process.Status.StopSignal()
+				log.Debugf("forwarding signal %v to pid=%d", sig, process.CurrentPid)
+				task.parseRunningInfo()
+				task.checkLimit()
+				if !process.ContinueWithSignal(int(sig)) {
+					log.Infof("Program not alive after signal forward")
+					task.parseRunningInfo()
+					break
+				}
+				continue
+			}
 			task.handleBrokenTraceStop("unexpected non-syscall ptrace stop")
 			break
 		}

@@ -87,6 +87,8 @@ func (task *RunningTask) trace() error {
 		task.check()
 		return nil
 	}
+	process.SetThreadGroup(process.Pid, process.Pid)
+	process.SetRusageOffset(process.Pid, process.Rusage.Maxrss)
 	if err := process.SetPtraceOptions(); err != nil {
 		log.Infof("PtraceSetOptions: err %v", err)
 		task.Result.RetCode = RUNTIME_ERROR
@@ -209,6 +211,9 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 			return false
 		}
 		process.AddTracee(newPid)
+		if process.PtraceEvent() != ptraceEventClone {
+			process.SetThreadGroup(newPid, newPid)
+		}
 		tracer.RegisterTracee(newPid, true)
 		log.Infof("registered traced child pid=%d from event=%d", newPid, process.PtraceEvent())
 	default:
@@ -306,8 +311,9 @@ func (task *RunningTask) outOfTime() bool {
 }
 
 func (task *RunningTask) outOfMemory() bool {
-	// check memory is over limit
-	isMLE := (task.Result.PeakMemory > task.memoryLimit) || (task.Result.RusageMemory > task.memoryLimit)
+	// PeakMemory comes from the traced program's /proc status and does not
+	// include bootstrap Go runtime noise the way wait4 rusage can.
+	isMLE := task.Result.PeakMemory > task.memoryLimit
 	if isMLE {
 		log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
 	}
@@ -321,44 +327,65 @@ func (task *RunningTask) refreshTimeCost() {
 }
 
 func (task *RunningTask) refreshMemory() {
-	peakMemory := int64(0)
-	seenThreadGroups := make(map[int]struct{})
-	for _, pid := range task.process.ActivePids() {
-		info, err := GetProcMemoryInfo(pid)
-		if err != nil {
-			if cachedGroup, ok := task.process.ThreadGroup(pid); ok {
-				if _, seen := seenThreadGroups[cachedGroup]; !seen {
-					memory, fallbackErr := GetProcMemory(cachedGroup)
-					if fallbackErr == nil {
-						seenThreadGroups[cachedGroup] = struct{}{}
-						peakMemory += memory
-						continue
-					}
-				}
-			}
-			log.Infof("Get status memory failed for pid %d: %v", pid, err)
-			continue
-		}
-		task.process.SetThreadGroup(pid, info.ThreadGroup)
-		tgid := info.ThreadGroup
-		if _, seen := seenThreadGroups[tgid]; seen {
-			continue
-		}
-		seenThreadGroups[tgid] = struct{}{}
-		peakMemory += info.PeakMemory
-	}
-	if peakMemory > 0 {
-		log.Debugf("peak memory across tracees is: %d", peakMemory)
-		if peakMemory > task.Result.PeakMemory {
-			task.Result.PeakMemory = peakMemory
+	if memory, ok := task.refreshPeakMemoryFromProc(); ok {
+		log.Debugf("peak memory across tracees is: %d", memory)
+		if memory > task.Result.PeakMemory {
+			task.Result.PeakMemory = memory
 		}
 	}
 
 	memory := task.process.Memory()
-	log.Debugf("rusage memory is: %d", memory)
+	log.Debugf("adjusted rusage memory is: %d", memory)
 	if memory > task.Result.RusageMemory {
 		task.Result.RusageMemory = memory
 	}
+	if memory > task.Result.PeakMemory {
+		log.Debugf("peak memory fallback from adjusted rusage is: %d", memory)
+		task.Result.PeakMemory = memory
+	}
+}
+
+func (task *RunningTask) refreshPeakMemoryFromProc() (int64, bool) {
+	groupPeaks := make(map[int]int64)
+	sampled := false
+
+	for _, pid := range task.process.ActivePids() {
+		info, err := GetProcMemoryInfo(pid)
+		if err == nil {
+			task.process.SetThreadGroup(pid, info.ThreadGroup)
+			if info.PeakMemory > groupPeaks[info.ThreadGroup] {
+				groupPeaks[info.ThreadGroup] = info.PeakMemory
+			}
+			sampled = true
+			continue
+		}
+
+		tgid, ok := task.process.ThreadGroup(pid)
+		if !ok || tgid <= 0 {
+			log.Infof("Get status memory failed for pid %d: %v", pid, err)
+			continue
+		}
+		if _, seen := groupPeaks[tgid]; seen {
+			continue
+		}
+
+		info, fallbackErr := GetProcMemoryInfo(tgid)
+		if fallbackErr != nil {
+			log.Infof("Get status memory failed for pid %d (tgid %d): %v", pid, tgid, fallbackErr)
+			continue
+		}
+		task.process.SetThreadGroup(pid, info.ThreadGroup)
+		if info.PeakMemory > groupPeaks[info.ThreadGroup] {
+			groupPeaks[info.ThreadGroup] = info.PeakMemory
+		}
+		sampled = true
+	}
+
+	var total int64
+	for _, memory := range groupPeaks {
+		total += memory
+	}
+	return total, sampled
 }
 
 func (task *RunningTask) parseRunningInfo() {

@@ -67,3 +67,14 @@ func TestProcessMemoryAggregatesPerThreadGroup(t *testing.T) {
 
 	assert.Equal(t, int64(112), process.Memory())
 }
+
+func TestProcessMemorySubtractsBootstrapOffset(t *testing.T) {
+	process := NewProcess(100)
+	process.recordRusage(100, syscall.Rusage{Maxrss: 96})
+	process.recordRusage(200, syscall.Rusage{Maxrss: 48})
+	process.SetThreadGroup(100, 100)
+	process.SetThreadGroup(200, 200)
+	process.SetRusageOffset(100, 64)
+
+	assert.Equal(t, int64(80), process.Memory())
+}

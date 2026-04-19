@@ -7,9 +7,11 @@ import (
 	"os"
 )
 
+var procStatusReader = os.ReadFile
+
 func readProcStatus(pid int) ([]byte, error) {
 	path := fmt.Sprintf("/proc/%d/status", pid)
-	return os.ReadFile(path)
+	return procStatusReader(path)
 }
 
 func GetProcMemoryInfo(pid int) (ProcMemoryInfo, error) {

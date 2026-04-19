@@ -18,6 +18,7 @@ type Process struct {
 	IsKilled     bool
 	tracees      map[int]struct{}
 	rusageByPid  map[int]syscall.Rusage
+	rusageOffset map[int]int64
 	threadGroups map[int]int
 	pendingStops map[int]processStop
 }
@@ -28,6 +29,9 @@ func (process *Process) ensureStateMaps() {
 	}
 	if process.rusageByPid == nil {
 		process.rusageByPid = make(map[int]syscall.Rusage)
+	}
+	if process.rusageOffset == nil {
+		process.rusageOffset = make(map[int]int64)
 	}
 	if process.threadGroups == nil {
 		process.threadGroups = make(map[int]int)
@@ -43,6 +47,7 @@ func NewProcess(pid int) *Process {
 		CurrentPid:   pid,
 		tracees:      make(map[int]struct{}),
 		rusageByPid:  make(map[int]syscall.Rusage),
+		rusageOffset: make(map[int]int64),
 		threadGroups: make(map[int]int),
 		pendingStops: make(map[int]processStop),
 	}
@@ -128,6 +133,14 @@ func (process *Process) ThreadGroup(pid int) (int, bool) {
 	return tgid, ok
 }
 
+func (process *Process) SetRusageOffset(groupID int, offset int64) {
+	process.ensureStateMaps()
+	if _, exists := process.rusageOffset[groupID]; exists {
+		return
+	}
+	process.rusageOffset[groupID] = offset
+}
+
 func (process *Process) takePendingTrackedStop() (int, processStop, bool) {
 	for pid, stop := range process.pendingStops {
 		if !process.HasTracee(pid) {
@@ -181,7 +194,13 @@ func (process *Process) Memory() int64 {
 		}
 	}
 	var total int64
-	for _, memory := range groupMaxRSS {
+	for groupID, memory := range groupMaxRSS {
+		if offset, ok := process.rusageOffset[groupID]; ok {
+			memory -= offset
+			if memory < 0 {
+				memory = 0
+			}
+		}
 		total += memory
 	}
 	return total

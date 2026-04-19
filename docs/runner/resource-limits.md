@@ -52,13 +52,13 @@
 ### Memory
 
 - 判题口径：
-  - `PeakMemory`：按 thread group 去重后汇总 `/proc/<pid>/status` 中的 `VmHWM`
-  - `RusageMemory`：按 thread group 分组后，取每组 `wait4(...).ru_maxrss` 的最大值，再对各组求和
+  - `PeakMemory`：最终用于判题的内存指标；优先按 thread group 去重后汇总 `/proc/<pid>/status` 中的 `VmHWM`
+  - `RusageMemory`：按 thread group 分组后，取每组 `wait4(...).ru_maxrss` 的最大值，再对各组求和；只用于诊断和补齐 `/proc` 未及时观测到的峰值
+  - 对 root tracee，会先扣除 exec 之前 bootstrap 阶段的 `ru_maxrss` 基线，避免把 launcher 自身的 RSS 噪音计入判题峰值
 - 两者都按 `KB` 记录，且都偏向 RSS / 常驻内存口径
 - 结果判定：
   - `PeakMemory > Memory`
-  - 或 `RusageMemory > Memory`
-  - 任一满足即记为 `MEMORY_LIMIT`
+  - 满足即记为 `MEMORY_LIMIT`
 - 内核兜底：
   - `RLIMIT_DATA = Memory + MemoryReserve`
   - `RLIMIT_AS = Memory + MemoryReserve`
@@ -102,7 +102,7 @@
 
 因此内存和栈相关事件要分两种情况看：
 
-- 如果判题层已经观测到 `PeakMemory` 或 `RusageMemory` 超出 `Memory`，最终会记为 `MEMORY_LIMIT`
+- 如果判题层已经观测到 `PeakMemory` 超出 `Memory`，最终会记为 `MEMORY_LIMIT`
 - 如果内核硬限制先触发，而判题层尚未观测到 RSS 超限，程序可能表现为分配失败、`SIGSEGV` 或非零退出码，最终记为 `RUNTIME_ERROR`
 
 `MemoryReserve` 的存在，就是为了尽量减少第二类“硬限制过早触发”的情况。

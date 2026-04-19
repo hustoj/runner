@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,10 +12,12 @@ type ProcMemoryInfo struct {
 	PeakMemory  int64
 }
 
+var ErrVmHWMNotFound = errors.New("VmHWM not found in proc status")
+
 func parseMemory(content string) (int64, error) {
 	value, ok := parseStatusField(content, "VmHWM")
 	if !ok {
-		return 0, nil
+		return 0, ErrVmHWMNotFound
 	}
 	return parseSize(value)
 }

@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,14 +95,14 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 	}
 }
 
-func TestParseCommandFallbackUsesFields(t *testing.T) {
-	tc := &TaskConfig{Command: "  /usr/bin/java   Main  "}
+func TestParseCommandFallbackUsesShlex(t *testing.T) {
+	tc := &TaskConfig{Command: `  /usr/bin/java   "Main Class"  `}
 	if got := tc.GetCommand(); got != "/usr/bin/java" {
 		t.Fatalf("GetCommand() = %q, want %q", got, "/usr/bin/java")
 	}
 	args := tc.GetArgs()
-	if len(args) != 1 || args[0] != "Main" {
-		t.Fatalf("GetArgs() = %v, want [Main]", args)
+	if len(args) != 1 || args[0] != "Main Class" {
+		t.Fatalf("GetArgs() = %v, want [Main Class]", args)
 	}
 }
 
@@ -129,6 +130,53 @@ func TestParseCommandSimpleDefault(t *testing.T) {
 	}
 	if args := tc.GetArgs(); len(args) != 0 {
 		t.Fatalf("GetArgs() = %v, want empty", args)
+	}
+}
+
+func TestResolveExecLooksUpPathAndCanonicalizesArgv0(t *testing.T) {
+	wantBinary, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("exec.LookPath(sh) error = %v", err)
+	}
+
+	tc := &TaskConfig{Command: `sh -c 'printf ok'`}
+	binary, args, err := tc.ResolveExec()
+	if err != nil {
+		t.Fatalf("ResolveExec() error = %v", err)
+	}
+	if binary != wantBinary {
+		t.Fatalf("ResolveExec() binary = %q, want %q", binary, wantBinary)
+	}
+
+	wantArgs := []string{wantBinary, "-c", "printf ok"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("ResolveExec() args = %v, want %v", args, wantArgs)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("ResolveExec() args[%d] = %q, want %q", i, args[i], wantArgs[i])
+		}
+	}
+}
+
+func TestResolveExecPreservesExplicitArgsPrecedence(t *testing.T) {
+	tc := &TaskConfig{Command: "/bin/echo", Args: []string{"hello world"}}
+	binary, args, err := tc.ResolveExec()
+	if err != nil {
+		t.Fatalf("ResolveExec() error = %v", err)
+	}
+	if binary != "/bin/echo" {
+		t.Fatalf("ResolveExec() binary = %q, want %q", binary, "/bin/echo")
+	}
+
+	wantArgs := []string{"/bin/echo", "hello world"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("ResolveExec() args = %v, want %v", args, wantArgs)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("ResolveExec() args[%d] = %q, want %q", i, args[i], wantArgs[i])
+		}
 	}
 }
 

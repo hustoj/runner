@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -43,11 +42,6 @@ func infof(format string, args ...interface{}) {
 	}
 }
 
-func makeArgs(binary string, cfg *CompileConfig) []string {
-	args := cfg.GetArgs()
-	return append([]string{binary}, args...)
-}
-
 func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu}); err != nil {
 		return err
@@ -68,14 +62,14 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 }
 
 func prepareCompileExecSpec(cfg *CompileConfig) (compileExecSpec, error) {
-	binary, err := exec.LookPath(cfg.Command)
+	binary, args, err := cfg.ResolveExec()
 	if err != nil {
 		return compileExecSpec{}, err
 	}
 
 	return compileExecSpec{
 		binary: binary,
-		args:   makeArgs(binary, cfg),
+		args:   args,
 		env:    os.Environ(),
 	}, nil
 }

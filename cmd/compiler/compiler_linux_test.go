@@ -9,6 +9,36 @@ import (
 	"testing"
 )
 
+func TestResolveExecIncludesBinary(t *testing.T) {
+	wantBinary, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("exec.LookPath(sh) error = %v", err)
+	}
+
+	cfg := &CompileConfig{
+		Command: "sh",
+		Args:    `-c 'printf ok'`,
+	}
+
+	binary, args, err := cfg.ResolveExec()
+	if err != nil {
+		t.Fatalf("ResolveExec() error = %v", err)
+	}
+	if binary != wantBinary {
+		t.Fatalf("ResolveExec() binary = %q, want %q", binary, wantBinary)
+	}
+
+	wantArgs := []string{wantBinary, "-c", "printf ok"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("ResolveExec() args = %v, want %v", args, wantArgs)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("ResolveExec() args[%d] = %q, want %q", i, args[i], wantArgs[i])
+		}
+	}
+}
+
 func waitStatusForCommand(t *testing.T, command string) syscall.WaitStatus {
 	t.Helper()
 

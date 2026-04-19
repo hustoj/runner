@@ -1,10 +1,13 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
+	"github.com/google/shlex"
 	"github.com/koding/multiconfig"
 )
 
@@ -42,6 +45,7 @@ type TaskConfig struct {
 	//LogPath  string `default:"/var/log/runner/runner.log"`
 	LogPath  string `default:"/dev/stderr"`
 	commands []string
+	parseErr error
 }
 
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
@@ -106,26 +110,61 @@ func (tc *TaskConfig) LogValidationWarnings() {
 }
 
 func (tc *TaskConfig) GetCommand() string {
-	tc.parseCommand()
+	if err := tc.parseCommand(); err != nil || len(tc.commands) == 0 {
+		return ""
+	}
 	return tc.commands[0]
 }
 
-func (tc *TaskConfig) parseCommand() {
-	if len(tc.commands) == 0 {
-		if len(tc.Args) > 0 {
-			tc.commands = append([]string{tc.Command}, tc.Args...)
-		} else {
-			tc.commands = strings.Fields(tc.Command)
-			if len(tc.commands) == 0 {
-				tc.commands = []string{tc.Command}
-			}
-		}
+func (tc *TaskConfig) parseCommand() error {
+	if len(tc.commands) > 0 || tc.parseErr != nil {
+		return tc.parseErr
 	}
+
+	if len(tc.Args) > 0 {
+		tc.commands = append([]string{tc.Command}, tc.Args...)
+		return nil
+	}
+
+	tc.commands, tc.parseErr = shlex.Split(tc.Command)
+	if len(tc.commands) == 0 {
+		tc.commands = []string{tc.Command}
+	}
+	return tc.parseErr
 }
 
 func (tc *TaskConfig) GetArgs() []string {
-	tc.parseCommand()
-	return tc.commands[1:]
+	if err := tc.parseCommand(); err != nil || len(tc.commands) <= 1 {
+		return nil
+	}
+	args := make([]string, len(tc.commands)-1)
+	copy(args, tc.commands[1:])
+	return args
+}
+
+func (tc *TaskConfig) ResolveExec() (string, []string, error) {
+	if err := tc.parseCommand(); err != nil {
+		return "", nil, err
+	}
+	if len(tc.commands) == 0 || tc.commands[0] == "" {
+		return "", nil, errors.New("empty command")
+	}
+
+	command := tc.commands[0]
+	binary := command
+	if tc.ChrootDir == "" && !strings.Contains(command, "/") {
+		resolved, err := exec.LookPath(command)
+		if err != nil {
+			return "", nil, err
+		}
+		binary = resolved
+	}
+
+	args := make([]string, 0, len(tc.commands))
+	args = append(args, binary)
+	args = append(args, tc.commands[1:]...)
+
+	return binary, args, nil
 }
 
 func LoadConfig() *TaskConfig {

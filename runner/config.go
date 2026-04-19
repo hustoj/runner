@@ -25,6 +25,8 @@ type TaskConfig struct {
 
 	Command    string   `default:"./main"`
 	Args       []string `default:""` // Explicit arguments; takes precedence over parsing Command
+	Input      string   `default:""` // Inline stdin content for local test harnesses
+	InputFile  string   `default:""` // Path to file whose contents become user.in
 	Language   int      `default:"2"`
 	WorkDir    string   `default:""`      // Working directory (empty = current dir)
 	ChrootDir  string   `default:""`      // Chroot jail directory (empty = no chroot)

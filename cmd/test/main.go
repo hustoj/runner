@@ -2,13 +2,33 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/hustoj/runner/runner"
 )
+
+const inputFileName = "user.in"
+
+func materializeInput(setting *runner.TaskConfig) error {
+	content := []byte(setting.Input)
+	if setting.InputFile != "" {
+		data, err := os.ReadFile(setting.InputFile)
+		if err != nil {
+			return err
+		}
+		content = data
+	}
+	return os.WriteFile(inputFileName, content, 0o600)
+}
 
 func main() {
 	setting := runner.LoadConfig()
 	runner.InitLogger(setting.LogPath, setting.Verbose)
 	setting.LogValidationWarnings()
+	if err := materializeInput(setting); err != nil {
+		fmt.Printf("prepare input failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	task := runner.RunningTask{}
 	task.Init(setting)

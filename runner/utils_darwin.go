@@ -7,10 +7,6 @@ import (
 	"os"
 )
 
-func fileDup(f1 *os.File, f2 *os.File) {
-	panic("fileDup is not supported on darwin")
-}
-
 const darwinDevelopmentOnlyMessage = "darwin is supported only for development, type-checking, and builds; runtime execution requires linux"
 
 func darwinDevelopmentOnlyError(feature string) error {
@@ -27,8 +23,4 @@ func openFileNoFollow(filename string, flag int, perm uint32) (*os.File, error) 
 
 func fileDupErr(_ *os.File, _ *os.File) error {
 	return darwinDevelopmentOnlyError("fileDupErr")
-}
-
-func ChangeRunningUser(user int) error {
-	return darwinDevelopmentOnlyError("ChangeRunningUser")
 }

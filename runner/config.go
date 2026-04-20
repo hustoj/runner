@@ -23,19 +23,19 @@ type TaskConfig struct {
 	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
 	RunGID int `default:"-1"` // GID to run as (-1 = no privilege drop)
 
-	Command    string   `default:"./main"`
-	Args       []string `default:""` // Explicit arguments; takes precedence over parsing Command
-	Input      string   `default:""` // Inline stdin content for local test harnesses
-	InputFile  string   `default:""` // Path to file whose contents become user.in
-	Language   int      `default:"2"`
-	WorkDir    string   `default:""`      // Working directory (empty = current dir)
-	ChrootDir  string   `default:""`      // Chroot jail directory (empty = no chroot)
-	NoNewPrivs bool     `default:"true"`  // Prevent privilege escalation via setuid binaries
-	UseMountNS bool     `default:"false"` // Isolate mount points
-	UsePIDNS   bool     `default:"false"` // Reserved: current launcher cannot realize PID namespaces without an extra fork
-	UseIPCNS   bool     `default:"false"` // Isolate IPC resources
-	UseUTSNS   bool     `default:"false"` // Isolate hostname/domainname
-	UseNetNS   bool     `default:"false"` // Isolate network stack
+	Command   string   `default:"./main"`
+	Args      []string `default:""` // Explicit arguments; takes precedence over parsing Command
+	Input     string   `default:""` // Inline stdin content for local test harnesses
+	InputFile string   `default:""` // Path to file whose contents become user.in
+
+	WorkDir    string `default:""`      // Working directory (empty = current dir)
+	ChrootDir  string `default:""`      // Chroot jail directory (empty = no chroot)
+	NoNewPrivs bool   `default:"true"`  // Prevent privilege escalation via setuid binaries
+	UseMountNS bool   `default:"false"` // Isolate mount points
+	UsePIDNS   bool   `default:"false"` // Reserved: current launcher cannot realize PID namespaces without an extra fork
+	UseIPCNS   bool   `default:"false"` // Isolate IPC resources
+	UseUTSNS   bool   `default:"false"` // Isolate hostname/domainname
+	UseNetNS   bool   `default:"false"` // Isolate network stack
 
 	OneTimeCalls  []string `default:"execve"`
 	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`

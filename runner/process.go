@@ -170,18 +170,6 @@ func (process *Process) recordRusage(pid int, rusage syscall.Rusage) {
 	process.rusageByPid[pid] = rusage
 }
 
-func (process *Process) Broken() bool {
-	if !process.Trapped() {
-		log.Debugf("Signal by: %v", process.Status.StopSignal())
-		return true
-	}
-	return false
-}
-
-func (process *Process) Trapped() bool {
-	return process.Status.StopSignal() == syscall.SIGTRAP
-}
-
 func (process *Process) Memory() int64 {
 	groupMaxRSS := make(map[int]int64)
 	for pid, ru := range process.rusageByPid {

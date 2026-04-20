@@ -11,13 +11,6 @@ import (
 	"syscall"
 )
 
-func fileDup(f1 *os.File, f2 *os.File) {
-	if int(f1.Fd()) != int(f2.Fd()) {
-		_ = syscall.Dup3(int(f1.Fd()), int(f2.Fd()), 0)
-	}
-	_ = f1.Close()
-}
-
 func fileDupErr(f1 *os.File, f2 *os.File) error {
 	if err := syscall.Dup3(int(f1.Fd()), int(f2.Fd()), 0); err != nil {
 		_ = f1.Close()
@@ -110,8 +103,4 @@ func openFileNoFollow(filename string, flags int, perm uint32) (*os.File, error)
 		return nil, fmt.Errorf("new file for %s returned nil", filename)
 	}
 	return file, nil
-}
-
-func ChangeRunningUser(user int) error {
-	return syscall.Setuid(user)
 }

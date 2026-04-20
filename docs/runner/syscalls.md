@@ -5,9 +5,9 @@
 > `runner/defaults_linux_*.go`. Per-case overrides live in each `case.json`
 > under `AdditionCalls`. This document is a human-readable summary.
 
-## Default allowed syscalls (all platforms)
+## Default allowed syscalls (runtime-supported Linux platforms)
 
-These are permitted by default via `AllowedCalls` in `TaskConfig`:
+These base defaults are permitted via `AllowedCalls` in `TaskConfig` on Linux before any platform-specific additions:
 
 ```
 read, write, brk, fstat, uname, mmap,

@@ -9,10 +9,11 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
 | Build (`make`) | ✅ | ✅ | ✅ |
 | Unit tests (`go test ./...`) | ✅ | ✅ | ✅ |
 | Run judge (`bin/runner`) | ✅ | ✅ | ❌ |
-| Integration tests (`make testall`) | ✅ | ✅ | ❌ |
+| Integration tests (`make testall`) | ✅ | validate on target host | ❌ |
 
-- **Runtime execution requires Linux (amd64 or arm64)**. The ptrace-based tracer and syscall tables are only available on these platforms.
-- macOS is supported for **development, compilation, and type-checking only**. Darwin stubs exist solely to enable cross-platform IDE workflows.
+- **Runtime execution is implemented for Linux (amd64 and arm64)**. The ptrace-based tracer and syscall tables are only available on these platforms.
+- macOS is supported for **development tasks, unit tests, compilation, and type-checking only**. Darwin stubs exist solely to enable cross-platform IDE workflows.
+- Full integration coverage (`make testall`) is maintained on Linux/amd64. On Linux/arm64, run the suite on the target host before treating it as a release gate.
 - Other Linux architectures may compile successfully, but the runner will fail at startup because the syscall table is unavailable.
 
 ## Install
@@ -28,7 +29,7 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
     ```sh
     cd runner
     make # will install go dependency
-    make testall # will check exception detect is ok, should all passed
+    make testall # Linux/amd64 integration check; run on your arm64 target host if needed
     ```
 
 ### `make testall` prerequisites

@@ -4,17 +4,20 @@
 
 ## Sandbox 行为级集成测试（原 #12）
 
-**背景**：当前 sandbox 相关测试只验证逻辑正确性（函数输入/输出），不验证实际行为。
+**当前状态**：已在 `runner/sandbox_behavior_linux_test.go` 增加一组 Linux 行为测试，直接验证真实内核状态，而不再只停留在 config/spec 层。
 
-需要在 Linux 环境下补充以下集成测试：
+已覆盖：
 
-- [ ] `no_new_privs` 生效验证：子进程设置 PR_SET_NO_NEW_PRIVS 后，setuid binary 应被拒绝提权
-- [ ] `chroot + workdir` 目录视图验证：chroot 后子进程只能看到 jail 内的文件系统
-- [ ] Namespace 创建验证：unshare(CLONE_NEWNS / CLONE_NEWIPC / ...) 后确认隔离效果
-- [ ] root / non-root 两条路径的对比测试
-- [ ] 凭据切换验证：setuid/setgid 后子进程确认身份变更
+- [x] `no_new_privs` 生效验证：通过读取 `/proc/self/status` 断言 `NoNewPrivs: 1`
+- [x] non-root 失败路径验证：普通用户启用 `chroot` / mount namespace 时应收到明确的 `EPERM`
+- [x] `chroot + workdir` 目录视图验证：进入 jail 后只能看到 jail 内文件，并确认工作目录切换到指定路径
+- [x] Namespace 创建验证：验证 mount namespace 与父进程不同；当前环境若无 `CAP_SYS_ADMIN` 会显式 skip
+- [x] 凭据切换验证：`setuid/setgid` 后确认 real/effective uid/gid 已切换
 
-**约束**：需要 root 权限或在 Docker/CI 中执行。
+仍需保证的执行条件：
+
+- [ ] 在具备 root 或等效 capability 的 Linux CI / 容器环境里稳定执行这组测试
+- [ ] 如后续引入更多 namespace 组合，补充更细粒度的隔离断言
 
 ## 内存限制实现验证（原待验证项 A）
 

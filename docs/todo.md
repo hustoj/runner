@@ -4,15 +4,15 @@
 
 ## Sandbox 行为级集成测试（原 #12）
 
-**当前状态**：已在 `runner/sandbox_behavior_linux_test.go` 增加一组 Linux 行为测试，直接验证真实内核状态，而不再只停留在 config/spec 层。
+**当前状态**：已在 `runner/sandbox_behavior_linux_test.go` 增加一组 Linux 行为测试，直接通过 `runProcess()` 启动真实 child path，并在 trace loop 之前检查 `/proc/<pid>` 状态。
 
 已覆盖：
 
-- [x] `no_new_privs` 生效验证：通过读取 `/proc/self/status` 断言 `NoNewPrivs: 1`
-- [x] non-root 失败路径验证：普通用户启用 `chroot` / mount namespace 时应收到明确的 `EPERM`
-- [x] `chroot + workdir` 目录视图验证：进入 jail 后只能看到 jail 内文件，并确认工作目录切换到指定路径
-- [x] Namespace 创建验证：验证 mount namespace 与父进程不同；当前环境若无 `CAP_SYS_ADMIN` 会显式 skip
-- [x] 凭据切换验证：`setuid/setgid` 后确认 real/effective uid/gid 已切换
+- [x] `no_new_privs` 生效验证：通过读取 `/proc/<pid>/status` 断言 `NoNewPrivs: 1`
+- [x] non-root 失败路径验证：普通用户启用 `chroot` / mount namespace 时，`runProcess()` 应返回明确的 `EPERM`
+- [x] `chroot + workdir` 验证：通过 `/proc/<pid>/root` 和 `/proc/<pid>/cwd` 确认已进入 jail 和目标工作目录
+- [x] Namespace 创建验证：验证 child 的 mount namespace 与父进程不同；当前环境若无 `CAP_SYS_ADMIN` 会显式 skip
+- [x] 凭据切换验证：`setuid/setgid` 后确认 `/proc/<pid>/status` 中的 `Uid/Gid` 已切换
 
 仍需保证的执行条件：
 

@@ -5,6 +5,7 @@
 ## 目录约定
 
 - 每个子目录都是一个独立工作目录，通常包含 `compile.json` 和待编译源码。
+- `compile.json` 里的 `args` 推荐使用 JSON 数组；仓库仍兼容历史 shell 风格字符串写法，方便老配置渐进迁移。
 - 编译输出默认会落在用例目录内的 `compile.out` / `compile.err`。
 - 常见运行方式是在具体用例目录下执行 `../../compiler`。
 

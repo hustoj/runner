@@ -18,6 +18,22 @@
 - 想改编译输出文件名：`compiler_linux.go` 中的 `doCompile`
 - 想看最终返回结构：`main.go` 中的 `RunResult`
 
+## `compile.json` 参数约定
+
+- 推荐使用 `Command` + `Args` 数组，例如：
+
+  ```json
+  {
+    "command": "g++",
+    "args": ["main.cpp", "-o", "main", "-O2", "--static"]
+  }
+  ```
+
+- `Args` 明确给出时，优先级高于对 `Command` 的拆分。
+- 为兼容旧配置，`args` 仍接受历史上的字符串写法，内部统一按 shell 风格拆分。
+- 通过环境变量或 flag 覆盖 `args` 时，也遵循同一套 shell 风格字符串规则。
+- 如果未提供 `Args`，`compiler` 会像 `runner` 一样尝试对 `Command` 做 `shlex` 拆分。
+
 ## 关键标识符
 
 - `CompileConfig`

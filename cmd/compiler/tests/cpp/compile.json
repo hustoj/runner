@@ -1,5 +1,5 @@
 {
 	"command": "g++",
 	"verbose": true,
-	"args": "main.cpp -o main -fno-asm -O2 -Wall -lm --static"
+	"args": ["main.cpp", "-o", "main", "-fno-asm", "-O2", "-Wall", "-lm", "--static"]
 }

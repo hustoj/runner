@@ -22,7 +22,7 @@ func TestResolveExecIncludesBinary(t *testing.T) {
 
 	cfg := &CompileConfig{
 		Command: "sh",
-		Args:    `-c 'printf ok'`,
+		Args:    newCompileArgs("-c", "printf ok"),
 	}
 
 	binary, args, err := cfg.ResolveExec()
@@ -154,7 +154,6 @@ func TestCompileFailureReason(t *testing.T) {
 func TestResolveExecReturnsErrorWhenCompilerBinaryMissing(t *testing.T) {
 	cfg := &CompileConfig{
 		Command: "definitely-missing-compiler-binary",
-		Args:    "",
 	}
 
 	_, _, err := cfg.ResolveExec()

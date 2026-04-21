@@ -3,191 +3,93 @@
 package runner
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 )
 
-const (
-	sandboxBehaviorHelperEnv      = "RUNNER_SANDBOX_BEHAVIOR_HELPER"
-	sandboxBehaviorModeEnv        = "RUNNER_SANDBOX_BEHAVIOR_MODE"
-	sandboxBehaviorJailEnv        = "RUNNER_SANDBOX_BEHAVIOR_JAIL"
-	sandboxBehaviorWorkDirEnv     = "RUNNER_SANDBOX_BEHAVIOR_WORKDIR"
-	sandboxBehaviorInsidePathEnv  = "RUNNER_SANDBOX_BEHAVIOR_INSIDE_PATH"
-	sandboxBehaviorOutsidePathEnv = "RUNNER_SANDBOX_BEHAVIOR_OUTSIDE_PATH"
-	sandboxBehaviorTargetUIDEnv   = "RUNNER_SANDBOX_BEHAVIOR_TARGET_UID"
-	sandboxBehaviorTargetGIDEnv   = "RUNNER_SANDBOX_BEHAVIOR_TARGET_GID"
+func TestRunProcessSetsNoNewPrivsBeforeTraceLoop(t *testing.T) {
+	runInSandboxWorkspace(t, func(_ string) {
+		task, cleanup, err := startSandboxedTask(t, sandboxRunProcessConfig("/bin/true"))
+		if err != nil {
+			t.Fatalf("runProcess() error = %v", err)
+		}
+		defer cleanup()
 
-	sandboxBehaviorFailureExitCode = 86
-)
-
-type sandboxBehaviorResult struct {
-	NoNewPrivs     string   `json:"no_new_privs,omitempty"`
-	CWD            string   `json:"cwd,omitempty"`
-	InsideFile     string   `json:"inside_file,omitempty"`
-	OutsideVisible bool     `json:"outside_visible,omitempty"`
-	OutsideError   string   `json:"outside_error,omitempty"`
-	UID            int      `json:"uid,omitempty"`
-	EUID           int      `json:"euid,omitempty"`
-	GID            int      `json:"gid,omitempty"`
-	EGID           int      `json:"egid,omitempty"`
-	UIDStatus      []string `json:"uid_status,omitempty"`
-	GIDStatus      []string `json:"gid_status,omitempty"`
-	MountNS        string   `json:"mount_ns,omitempty"`
+		status, err := readProcStatusFields(task.process.Pid, "NoNewPrivs")
+		if err != nil {
+			t.Fatalf("readProcStatusFields(NoNewPrivs) error = %v", err)
+		}
+		if firstField(status["NoNewPrivs"]) != "1" {
+			t.Fatalf("NoNewPrivs = %q, want %q", firstField(status["NoNewPrivs"]), "1")
+		}
+	})
 }
 
-func TestSandboxBehaviorHelperProcess(t *testing.T) {
-	if os.Getenv(sandboxBehaviorHelperEnv) != "1" {
-		return
-	}
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	mode := os.Getenv(sandboxBehaviorModeEnv)
-	cfg, err := sandboxBehaviorConfig(mode)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sandbox helper config failed: %v\n", err)
-		os.Exit(2)
-	}
-
-	spec, err := prepareChildSandboxSpec(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "prepareChildSandboxSpec failed: %v\n", err)
-		os.Exit(3)
-	}
-
-	if failure := applySandboxInChild(spec); failure.failed() {
-		fmt.Fprintf(os.Stderr, "sandbox startup failed at %s: %v\n", failure.stage, failure.errno)
-		os.Exit(sandboxBehaviorFailureExitCode)
-	}
-
-	result, err := sandboxBehaviorProbe(mode)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sandbox helper probe failed: %v\n", err)
-		os.Exit(4)
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
-		fmt.Fprintf(os.Stderr, "encode sandbox helper result failed: %v\n", err)
-		os.Exit(5)
-	}
-}
-
-func TestSandboxNoNewPrivsBehavior(t *testing.T) {
-	result, output, err := runSandboxBehaviorHelper(t, "no_new_privs", nil)
-	if err != nil {
-		t.Fatalf("sandbox helper failed: %v\noutput: %s", err, output)
-	}
-	if result.NoNewPrivs != "1" {
-		t.Fatalf("NoNewPrivs = %q, want %q", result.NoNewPrivs, "1")
-	}
-}
-
-func TestSandboxPrivilegedPathsRequirePrivilegesWhenUnprivileged(t *testing.T) {
+func TestRunProcessPropagatesSandboxPermissionFailures(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("requires non-root to validate permission failures")
+		t.Skip("requires non-root to validate privileged sandbox failure propagation")
 	}
 
 	t.Run("chroot", func(t *testing.T) {
-		tempDir := t.TempDir()
-		jailDir := filepath.Join(tempDir, "jail")
-		workDir := filepath.Join(jailDir, "work")
-		if err := os.MkdirAll(workDir, 0o755); err != nil {
-			t.Fatalf("os.MkdirAll(%q) error = %v", workDir, err)
-		}
+		runInSandboxWorkspace(t, func(tempDir string) {
+			cfg := sandboxRunProcessConfig("/bin/true")
+			cfg.ChrootDir = filepath.Join(tempDir, "jail")
+			if err := os.MkdirAll(cfg.ChrootDir, 0o755); err != nil {
+				t.Fatalf("os.MkdirAll(%q) error = %v", cfg.ChrootDir, err)
+			}
 
-		_, output, err := runSandboxBehaviorHelper(t, "chroot_workdir", map[string]string{
-			sandboxBehaviorJailEnv:    jailDir,
-			sandboxBehaviorWorkDirEnv: "/work",
+			_, _, err := startSandboxedTask(t, cfg)
+			assertSandboxStartupError(t, err, "chroot", syscall.EPERM)
 		})
-		if err == nil {
-			t.Fatal("sandbox helper unexpectedly succeeded without chroot privilege")
-		}
-		assertSandboxPermissionFailure(t, output, "chroot")
 	})
 
 	t.Run("mount namespace", func(t *testing.T) {
-		_, output, err := runSandboxBehaviorHelper(t, "mount_namespace", nil)
-		if err == nil {
-			t.Fatal("sandbox helper unexpectedly succeeded without namespace privilege")
+		runInSandboxWorkspace(t, func(_ string) {
+			cfg := sandboxRunProcessConfig("/bin/true")
+			cfg.UseMountNS = true
+
+			_, _, err := startSandboxedTask(t, cfg)
+			assertSandboxStartupError(t, err, "setup namespaces", syscall.EPERM)
+		})
+	})
+}
+
+func TestRunProcessSetsCredentialsBeforeTraceLoop(t *testing.T) {
+	requireSandboxRoot(t)
+
+	runInSandboxWorkspace(t, func(_ string) {
+		const targetID = 65534
+
+		cfg := sandboxRunProcessConfig("/bin/true")
+		cfg.RunUID = targetID
+		cfg.RunGID = targetID
+
+		task, cleanup, err := startSandboxedTask(t, cfg)
+		if err != nil {
+			t.Fatalf("runProcess() error = %v", err)
 		}
-		assertSandboxPermissionFailure(t, output, "setup namespaces")
+		defer cleanup()
+
+		status, err := readProcStatusFields(task.process.Pid, "Uid", "Gid")
+		if err != nil {
+			t.Fatalf("readProcStatusFields(Uid,Gid) error = %v", err)
+		}
+		if !allFieldsEqual(status["Uid"], targetID) {
+			t.Fatalf("Uid status = %v, want all %d", status["Uid"], targetID)
+		}
+		if !allFieldsEqual(status["Gid"], targetID) {
+			t.Fatalf("Gid status = %v, want all %d", status["Gid"], targetID)
+		}
 	})
 }
 
-func TestSandboxChrootAndWorkDirBehavior(t *testing.T) {
-	requireSandboxRoot(t)
-
-	tempDir := t.TempDir()
-	jailDir := filepath.Join(tempDir, "jail")
-	workDir := filepath.Join(jailDir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatalf("os.MkdirAll(%q) error = %v", workDir, err)
-	}
-
-	insidePath := filepath.Join(workDir, "inside.txt")
-	if err := os.WriteFile(insidePath, []byte("inside\n"), 0o644); err != nil {
-		t.Fatalf("os.WriteFile(%q) error = %v", insidePath, err)
-	}
-
-	outsidePath := filepath.Join(tempDir, "outside.txt")
-	if err := os.WriteFile(outsidePath, []byte("outside\n"), 0o644); err != nil {
-		t.Fatalf("os.WriteFile(%q) error = %v", outsidePath, err)
-	}
-
-	result, output, err := runSandboxBehaviorHelper(t, "chroot_workdir", map[string]string{
-		sandboxBehaviorJailEnv:        jailDir,
-		sandboxBehaviorWorkDirEnv:     "/work",
-		sandboxBehaviorInsidePathEnv:  "/work/inside.txt",
-		sandboxBehaviorOutsidePathEnv: outsidePath,
-	})
-	if err != nil {
-		t.Fatalf("sandbox helper failed: %v\noutput: %s", err, output)
-	}
-	if result.CWD != "/work" {
-		t.Fatalf("cwd = %q, want %q", result.CWD, "/work")
-	}
-	if result.InsideFile != "inside\n" {
-		t.Fatalf("inside file = %q, want %q", result.InsideFile, "inside\n")
-	}
-	if result.OutsideVisible {
-		t.Fatalf("outside path remained visible after chroot: %q", outsidePath)
-	}
-}
-
-func TestSandboxCredentialSwitchBehavior(t *testing.T) {
-	requireSandboxRoot(t)
-
-	const targetID = 65534
-	result, output, err := runSandboxBehaviorHelper(t, "credentials", map[string]string{
-		sandboxBehaviorTargetUIDEnv: strconv.Itoa(targetID),
-		sandboxBehaviorTargetGIDEnv: strconv.Itoa(targetID),
-	})
-	if err != nil {
-		t.Fatalf("sandbox helper failed: %v\noutput: %s", err, output)
-	}
-	if result.UID != targetID || result.EUID != targetID {
-		t.Fatalf("uid/euid = (%d,%d), want (%d,%d)", result.UID, result.EUID, targetID, targetID)
-	}
-	if result.GID != targetID || result.EGID != targetID {
-		t.Fatalf("gid/egid = (%d,%d), want (%d,%d)", result.GID, result.EGID, targetID, targetID)
-	}
-	if !allFieldsEqual(result.UIDStatus, targetID) {
-		t.Fatalf("Uid status = %v, want all %d", result.UIDStatus, targetID)
-	}
-	if !allFieldsEqual(result.GIDStatus, targetID) {
-		t.Fatalf("Gid status = %v, want all %d", result.GIDStatus, targetID)
-	}
-}
-
-func TestSandboxMountNamespaceBehavior(t *testing.T) {
+func TestRunProcessCreatesMountNamespaceBeforeTraceLoop(t *testing.T) {
 	requireSandboxRoot(t)
 
 	parentMountNS, err := os.Readlink("/proc/self/ns/mnt")
@@ -195,142 +97,142 @@ func TestSandboxMountNamespaceBehavior(t *testing.T) {
 		t.Fatalf("os.Readlink(/proc/self/ns/mnt) error = %v", err)
 	}
 
-	result, output, err := runSandboxBehaviorHelper(t, "mount_namespace", nil)
-	if err != nil {
-		if isNamespacePermissionSkip(output) {
-			t.Skipf("mount namespace is unavailable in current environment: %s", strings.TrimSpace(string(output)))
+	runInSandboxWorkspace(t, func(_ string) {
+		cfg := sandboxRunProcessConfig("/bin/true")
+		cfg.UseMountNS = true
+
+		task, cleanup, err := startSandboxedTask(t, cfg)
+		if err != nil {
+			if isSandboxStartupPermissionError(err, "setup namespaces", syscall.EPERM) {
+				t.Skipf("mount namespace is unavailable in current environment: %v", err)
+			}
+			t.Fatalf("runProcess() error = %v", err)
 		}
-		t.Fatalf("sandbox helper failed: %v\noutput: %s", err, output)
-	}
-	if result.MountNS == "" {
-		t.Fatal("mount namespace result is empty")
-	}
-	if result.MountNS == parentMountNS {
-		t.Fatalf("mount namespace = %q, want a different namespace from parent %q", result.MountNS, parentMountNS)
+		defer cleanup()
+
+		mountNS, err := readProcLink(task.process.Pid, "ns/mnt")
+		if err != nil {
+			t.Fatalf("readProcLink(ns/mnt) error = %v", err)
+		}
+		if mountNS == parentMountNS {
+			t.Fatalf("mount namespace = %q, want different from parent %q", mountNS, parentMountNS)
+		}
+	})
+}
+
+func TestRunProcessAppliesChrootAndWorkDirBeforeTraceLoop(t *testing.T) {
+	requireSandboxRoot(t)
+
+	runInSandboxWorkspace(t, func(tempDir string) {
+		jailDir := filepath.Join(tempDir, "jail")
+		workDir := filepath.Join(jailDir, "work")
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			t.Fatalf("os.MkdirAll(%q) error = %v", workDir, err)
+		}
+
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable() error = %v", err)
+		}
+		jailBinary := filepath.Join(jailDir, "helper")
+		if err := copyExecutable(self, jailBinary); err != nil {
+			t.Fatalf("copyExecutable(%q,%q) error = %v", self, jailBinary, err)
+		}
+
+		cfg := sandboxRunProcessConfig("/helper")
+		cfg.ChrootDir = jailDir
+		cfg.WorkDir = "/work"
+
+		task, cleanup, err := startSandboxedTask(t, cfg)
+		if err != nil {
+			if isSandboxStartupExecUnavailable(err) {
+				t.Skipf("copied test binary is not executable inside chroot jail: %v", err)
+			}
+			t.Fatalf("runProcess() error = %v", err)
+		}
+		defer cleanup()
+
+		rootPath, err := readProcLink(task.process.Pid, "root")
+		if err != nil {
+			t.Fatalf("readProcLink(root) error = %v", err)
+		}
+		if rootPath != jailDir {
+			t.Fatalf("proc root = %q, want %q", rootPath, jailDir)
+		}
+
+		cwdPath, err := readProcLink(task.process.Pid, "cwd")
+		if err != nil {
+			t.Fatalf("readProcLink(cwd) error = %v", err)
+		}
+		wantCWD := filepath.Join(jailDir, "work")
+		if cwdPath != wantCWD {
+			t.Fatalf("proc cwd = %q, want %q", cwdPath, wantCWD)
+		}
+	})
+}
+
+func sandboxRunProcessConfig(command string) *TaskConfig {
+	return &TaskConfig{
+		CPU:           1,
+		Memory:        64,
+		MemoryReserve: 32,
+		Output:        16,
+		Stack:         8,
+		Command:       command,
+		RunUID:        -1,
+		RunGID:        -1,
+		NoNewPrivs:    true,
 	}
 }
 
-func runSandboxBehaviorHelper(t *testing.T, mode string, extraEnv map[string]string) (sandboxBehaviorResult, []byte, error) {
+func startSandboxedTask(t *testing.T, cfg *TaskConfig) (*RunningTask, func(), error) {
 	t.Helper()
 
-	self, err := os.Executable()
+	if _, err := InitLogger("/dev/null", false); err != nil {
+		t.Fatalf("InitLogger(/dev/null) error = %v", err)
+	}
+
+	task := &RunningTask{}
+	task.Init(cfg)
+	if err := task.runProcess(); err != nil {
+		return nil, func() {}, err
+	}
+
+	cleanup := func() {
+		if task.process != nil {
+			task.process.Kill()
+		}
+	}
+	return task, cleanup, nil
+}
+
+func runInSandboxWorkspace(t *testing.T, fn func(tempDir string)) {
+	t.Helper()
+
+	previousWD, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("os.Executable() error = %v", err)
+		t.Fatalf("os.Getwd() error = %v", err)
 	}
 
-	env := append(os.Environ(),
-		sandboxBehaviorHelperEnv+"=1",
-		sandboxBehaviorModeEnv+"="+mode,
-	)
-	for key, value := range extraEnv {
-		env = append(env, key+"="+value)
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("os.Chdir(%q) error = %v", tempDir, err)
+	}
+	defer func() {
+		if err := os.Chdir(previousWD); err != nil {
+			t.Fatalf("restore working directory error = %v", err)
+		}
+	}()
+
+	if err := os.WriteFile("user.in", []byte(""), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(user.in) error = %v", err)
 	}
 
-	cmd := &exec.Cmd{
-		Path: self,
-		Args: []string{self, "-test.run=^TestSandboxBehaviorHelperProcess$"},
-		Env:  env,
-	}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return sandboxBehaviorResult{}, output, err
-	}
-
-	var result sandboxBehaviorResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return sandboxBehaviorResult{}, output, fmt.Errorf("decode sandbox helper result: %w", err)
-	}
-	return result, output, nil
+	fn(tempDir)
 }
 
-func sandboxBehaviorConfig(mode string) (SandboxConfig, error) {
-	switch mode {
-	case "no_new_privs":
-		return SandboxConfig{NoNewPrivs: true, UID: -1, GID: -1}, nil
-	case "chroot_workdir":
-		return SandboxConfig{
-			UID:        -1,
-			GID:        -1,
-			NoNewPrivs: true,
-			ChrootDir:  os.Getenv(sandboxBehaviorJailEnv),
-			WorkDir:    os.Getenv(sandboxBehaviorWorkDirEnv),
-		}, nil
-	case "credentials":
-		uid, err := strconv.Atoi(os.Getenv(sandboxBehaviorTargetUIDEnv))
-		if err != nil {
-			return SandboxConfig{}, fmt.Errorf("parse target uid: %w", err)
-		}
-		gid, err := strconv.Atoi(os.Getenv(sandboxBehaviorTargetGIDEnv))
-		if err != nil {
-			return SandboxConfig{}, fmt.Errorf("parse target gid: %w", err)
-		}
-		return SandboxConfig{
-			UID:        uid,
-			GID:        gid,
-			NoNewPrivs: true,
-		}, nil
-	case "mount_namespace":
-		return SandboxConfig{
-			UID:        -1,
-			GID:        -1,
-			NoNewPrivs: true,
-			UseMountNS: true,
-		}, nil
-	default:
-		return SandboxConfig{}, fmt.Errorf("unknown sandbox helper mode %q", mode)
-	}
-}
-
-func sandboxBehaviorProbe(mode string) (sandboxBehaviorResult, error) {
-	switch mode {
-	case "no_new_privs":
-		fields, err := readProcStatusFields("NoNewPrivs")
-		if err != nil {
-			return sandboxBehaviorResult{}, err
-		}
-		return sandboxBehaviorResult{NoNewPrivs: firstField(fields["NoNewPrivs"])}, nil
-	case "chroot_workdir":
-		cwd, err := os.Getwd()
-		if err != nil {
-			return sandboxBehaviorResult{}, err
-		}
-		insideData, err := os.ReadFile(os.Getenv(sandboxBehaviorInsidePathEnv))
-		if err != nil {
-			return sandboxBehaviorResult{}, err
-		}
-		_, outsideErr := os.Stat(os.Getenv(sandboxBehaviorOutsidePathEnv))
-		return sandboxBehaviorResult{
-			CWD:            cwd,
-			InsideFile:     string(insideData),
-			OutsideVisible: outsideErr == nil,
-			OutsideError:   errorString(outsideErr),
-		}, nil
-	case "credentials":
-		fields, err := readProcStatusFields("Uid", "Gid")
-		if err != nil {
-			return sandboxBehaviorResult{}, err
-		}
-		return sandboxBehaviorResult{
-			UID:       os.Getuid(),
-			EUID:      os.Geteuid(),
-			GID:       os.Getgid(),
-			EGID:      os.Getegid(),
-			UIDStatus: fields["Uid"],
-			GIDStatus: fields["Gid"],
-		}, nil
-	case "mount_namespace":
-		mountNS, err := os.Readlink("/proc/self/ns/mnt")
-		if err != nil {
-			return sandboxBehaviorResult{}, err
-		}
-		return sandboxBehaviorResult{MountNS: mountNS}, nil
-	default:
-		return sandboxBehaviorResult{}, fmt.Errorf("unknown sandbox helper mode %q", mode)
-	}
-}
-
-func readProcStatusFields(keys ...string) (map[string][]string, error) {
-	data, err := os.ReadFile("/proc/self/status")
+func readProcStatusFields(pid int, keys ...string) (map[string][]string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
 	if err != nil {
 		return nil, err
 	}
@@ -346,10 +248,14 @@ func readProcStatusFields(keys ...string) (map[string][]string, error) {
 			break
 		}
 		if len(result[key]) == 0 {
-			return nil, fmt.Errorf("status key %q not found in /proc/self/status", key)
+			return nil, fmt.Errorf("status key %q not found in /proc/%d/status", key, pid)
 		}
 	}
 	return result, nil
+}
+
+func readProcLink(pid int, name string) (string, error) {
+	return os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), name))
 }
 
 func firstField(values []string) string {
@@ -372,34 +278,57 @@ func allFieldsEqual(values []string, want int) bool {
 	return true
 }
 
-func errorString(err error) string {
-	if err == nil {
-		return ""
+func copyExecutable(src string, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
 	}
-	return err.Error()
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func requireSandboxRoot(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() != 0 {
-		t.Skip("requires root on linux to validate real sandbox behavior")
+		t.Skip("requires root on linux to validate privileged sandbox behavior")
 	}
 }
 
-func isNamespacePermissionSkip(output []byte) bool {
-	if !strings.Contains(string(output), "sandbox startup failed at setup namespaces") {
+func assertSandboxStartupError(t *testing.T, err error, stage string, errno syscall.Errno) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("runProcess() unexpectedly succeeded, want child startup failure at %s", stage)
+	}
+	if !isSandboxStartupPermissionError(err, stage, errno) {
+		t.Fatalf("runProcess() error = %v, want child startup failure at %s: %v", err, stage, errno)
+	}
+}
+
+func isSandboxStartupPermissionError(err error, stage string, errno syscall.Errno) bool {
+	if err == nil {
 		return false
 	}
-	return strings.Contains(string(output), syscall.EPERM.Error())
+	message := err.Error()
+	return strings.Contains(message, "child startup failed at "+stage) && strings.Contains(message, errno.Error())
 }
 
-func assertSandboxPermissionFailure(t *testing.T, output []byte, stage string) {
-	t.Helper()
-	message := string(output)
-	if !strings.Contains(message, "sandbox startup failed at "+stage) {
-		t.Fatalf("sandbox failure output = %q, want stage %q", message, stage)
+func isSandboxStartupExecUnavailable(err error) bool {
+	if err == nil {
+		return false
 	}
-	if !strings.Contains(message, syscall.EPERM.Error()) {
-		t.Fatalf("sandbox failure output = %q, want %q", message, syscall.EPERM.Error())
+	message := err.Error()
+	if !strings.Contains(message, "child startup failed at execve") {
+		return false
 	}
+	return strings.Contains(message, syscall.ENOENT.Error()) || strings.Contains(message, syscall.ENOEXEC.Error())
 }

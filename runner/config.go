@@ -18,6 +18,7 @@ type TaskConfig struct {
 	MemoryReserve int `default:"32"`  // Extra MB reserved for RLIMIT_DATA / RLIMIT_AS
 	Output        int `default:"16"`  // Output size limit in MB
 	Stack         int `default:"8"`   // Stack size limit in MB
+	MaxProcs      int `default:"16"`  // Max number of processes/threads (RLIMIT_NPROC)
 
 	// Sandbox security settings
 	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
@@ -69,6 +70,9 @@ func (tc *TaskConfig) Validate() error {
 	}
 	if tc.Stack < 0 {
 		return fmt.Errorf("stack must be >= 0 (got %d)", tc.Stack)
+	}
+	if tc.MaxProcs < 1 {
+		return fmt.Errorf("maxProcs must be >= 1 (got %d)", tc.MaxProcs)
 	}
 
 	if (tc.RunUID >= 0 && tc.RunGID < 0) || (tc.RunUID < 0 && tc.RunGID >= 0) {

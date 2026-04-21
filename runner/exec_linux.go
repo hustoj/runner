@@ -22,6 +22,7 @@ const (
 	childStageLimitStack
 	childStageLimitData
 	childStageLimitAddressSpace
+	childStageLimitNProc
 	childStageLimitOpenFiles
 	childStageLimitCore
 	childStageDupStdin
@@ -64,6 +65,8 @@ func (s childStartupStage) String() string {
 		return "set data rlimit"
 	case childStageLimitAddressSpace:
 		return "set address-space rlimit"
+	case childStageLimitNProc:
+		return "set nproc rlimit"
 	case childStageLimitOpenFiles:
 		return "set open-file rlimit"
 	case childStageLimitCore:
@@ -123,6 +126,7 @@ type childProcessSpec struct {
 	outputLimit     syscall.Rlimit
 	stackLimit      syscall.Rlimit
 	hardMemoryLimit syscall.Rlimit
+	nProcLimit      syscall.Rlimit
 	noFileLimit     syscall.Rlimit
 	coreLimit       syscall.Rlimit
 	alarmSeconds    uint64
@@ -235,6 +239,10 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		hardMemoryLimit: syscall.Rlimit{
 			Max: hardMemoryLimit,
 			Cur: hardMemoryLimit,
+		},
+		nProcLimit: syscall.Rlimit{
+			Max: uint64(task.setting.MaxProcs),
+			Cur: uint64(task.setting.MaxProcs),
 		},
 		noFileLimit: syscall.Rlimit{
 			Max: 16,
@@ -372,6 +380,9 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.hardMemoryLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitAddressSpace, errno)
+	}
+	if errno := setResourceLimit(syscall.RLIMIT_NPROC, &spec.nProcLimit); errno != 0 {
+		reportChildStartupFailure(pipeWriteFD, childStageLimitNProc, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_NOFILE, &spec.noFileLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitOpenFiles, errno)

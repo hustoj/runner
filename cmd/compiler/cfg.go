@@ -78,7 +78,7 @@ type CompileConfig struct {
 	Stack   int          `default:"8"`
 	Command string       `default:"gcc"`
 	Verbose bool         `default:"false"`
-	LogPath string       `default:"/var/log/runner/compiler.log"`
+	LogPath string       `default:""`
 	Args    *CompileArgs `default:"main.c -o main -O2 -fmax-errors=10 -Wall --static -lm --std=c99"`
 
 	commands []string

@@ -34,6 +34,12 @@
 - 通过环境变量或 flag 覆盖 `args` 时，也遵循同一套 shell 风格字符串规则。
 - 如果未提供 `Args`，`compiler` 会像 `runner` 一样尝试对 `Command` 做 `shlex` 拆分。
 
+## 日志输出
+
+- `LogPath` 默认值为空字符串，此时日志写到 `stderr`，适合容器和判题 worker 由外部平台统一采集。
+- 如需写入文件，请在 `compile.json` 中显式配置 `LogPath`，并确保目录已存在且运行用户有写权限。
+- 例如使用 `/var/log/runner/compiler.log` 时，部署脚本或镜像构建流程应提前创建 `/var/log/runner` 并设置正确的 owner/permission。
+
 ## 关键标识符
 
 - `CompileConfig`

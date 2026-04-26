@@ -25,7 +25,7 @@
 Runner 需要运行在 cgroup v2 环境中，并满足：
 
 - cgroup v2 mount 可访问（默认 `/sys/fs/cgroup`）
-- `memory` controller 已对目标子树启用
+- `memory` 与 `pids` controller 已对目标子树启用
 - runner 能在一个已委派的父 cgroup 下创建子 cgroup
 
 可用环境变量：
@@ -47,7 +47,7 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 
 - 是可写目录
 - `cgroup.type` 是 `domain`（root cgroup 允许为空）
-- `cgroup.subtree_control` 已包含 `memory`
+- `cgroup.subtree_control` 已包含 `memory` 和 `pids`
 - 没有 internal processes（root cgroup 除外）
 
 这样做的目的，是确保新建的 run cgroup 能直接拿到 `memory.max` / `memory.events` / `memory.peak` 这些 controller 文件，而不在 runtime 里去偷偷改上层 `subtree_control`。
@@ -64,6 +64,7 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 
 - `memory.oom.group = 1`
 - `memory.max = Memory << 20`
+- `pids.max = MaxProcs`
 - `memory.swap.max = 0`（如果该文件存在）
 
 随后进入新的 child 启动时序：
@@ -94,9 +95,16 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 
 `RusageMemory` 仍然保留，但只做诊断字段。
 
-### 5.2 其它限制
+### 5.2 MaxProcs
 
-这次迁移没有改动：
+- `MaxProcs`
+  - Linux 上通过 task cgroup v2 `pids.max` enforcement
+  - 口径是当前 task 自己的进程 / 线程树，不与同 UID 其它进程共享配额
+  - 这也是修复 JVM 启动阶段 `clone3() -> EAGAIN` 的关键，详见 [`java-runtime-follow-up.md`](./java-runtime-follow-up.md)
+
+### 5.3 其它限制
+
+内存迁移主方案本身没有改动：
 
 - CPU：`RLIMIT_CPU` + `alarm`
 - Output：`RLIMIT_FSIZE`
@@ -129,3 +137,17 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 1. 不再依赖 `/proc` 采样捕获短生命周期 MLE
 2. 不再需要 `MemoryReserve` 这种地址空间缓冲 workaround
 3. Memory 的 enforcement 与 verdict 终于共用同一套内核记账
+
+## 9. Java follow-up
+
+内存迁移完成后，通用 Java case 暴露了两个额外问题：
+
+1. `MaxProcs` 继续用 `RLIMIT_NPROC` 时，语义仍然是同 UID 全局计数，不是 task-local 限制
+2. tracer 会把快速退出线程上的 `PtraceGetRegs(...)=ESRCH` 误判成 syscall 违规
+
+这两个问题随后分别修成：
+
+- `MaxProcs -> pids.max`
+- `ESRCH -> tracee gone`
+
+完整排查与取舍记录见 [`java-runtime-follow-up.md`](./java-runtime-follow-up.md)。

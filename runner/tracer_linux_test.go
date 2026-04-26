@@ -44,3 +44,41 @@ func TestTracerDetectTracksTraceeStatePerPid(t *testing.T) {
 	tracer.RemoveTracee(101)
 	assert.False(t, tracer.HasTracee(101))
 }
+
+func TestCheckSyscallTreatsUnknownPidAsGone(t *testing.T) {
+	tracer := &TracerDetect{}
+
+	assert.Equal(t, syscallCheckTraceeGone, tracer.checkSyscall(1234))
+}
+
+func TestCheckSyscallTreatsESRCHAsTraceeGone(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		return syscall.ESRCH
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckTraceeGone, tracer.checkSyscall(100))
+}
+
+func TestCheckSyscallTreatsUnexpectedPtraceErrorsAsTracerError(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		return syscall.EIO
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckTracerError, tracer.checkSyscall(100))
+}

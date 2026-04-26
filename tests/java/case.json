@@ -3,6 +3,7 @@
   "verbose": true,
   "CPU": 5,
   "Memory": 256,
+  "MaxProcs": 64,
   "Result": 4,
   "Output": 64,
   "AdditionCalls": [

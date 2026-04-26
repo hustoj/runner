@@ -18,6 +18,12 @@
 - `Stack`
   - 单位：MB
   - 语义：独立的栈上限，直接映射到 `RLIMIT_STACK`
+- `MaxProcs`
+  - 单位：个
+  - 语义：任务可创建的进程 / 线程总数上限，Linux 上映射到 task cgroup v2 `pids.max`
+  - Linux 口径是“当前 task 自己的进程 / 线程树”，不再受同 UID 其它桌面进程影响
+  - 默认值 `16` 对 C / C++ 通常够用，但 JVM 这类运行时往往需要显式调大
+  - 背后的 Java 回归与修复过程见 [`java-runtime-follow-up.md`](./java-runtime-follow-up.md)
 - `Output`
   - 单位：MB
   - 语义：输出文件大小上限
@@ -29,13 +35,18 @@ Linux 运行期现在分成两类：
 1. **统一口径限制**
    - 目前只有 Memory
    - enforcement 与 verdict 都来自 cgroup v2
-2. **判题层 + 内核兜底**
+2. **task cgroup 硬限制**
+   - 目前是 MaxProcs
+   - enforcement 来自 cgroup v2 `pids.max`
+   - 触发后通常表现为新的 `clone()` / `clone3()` / `fork()` 失败
+3. **判题层 + 内核兜底**
    - 目前是 CPU / Output / Stack
    - 分别由 trace 结果、signal、`setrlimit` 与 `alarm` 共同决定
 
 这意味着：
 
 - Memory 不再是“采样值 + 地址空间 workaround”的双轨模型
+- MaxProcs 不再依赖同 UID 全局共享的 `RLIMIT_NPROC` 语义
 - 如果 cgroup v2 memory backend 不可用，runner 会**明确启动失败**
 - 不会再静默退回 `RLIMIT_DATA` / `RLIMIT_AS`
 
@@ -74,6 +85,19 @@ Linux 运行期现在分成两类：
 
 ## 4. 其它资源限制
 
+### MaxProcs
+
+- enforcement：
+  - `pids.max = MaxProcs`
+- Linux 行为：
+  - 当 task 内的进程 / 线程总数达到上限后，新的 `clone()` / `clone3()` / `fork()` / `vfork()` 会失败
+  - 这类失败不会自动映射成单独的判题码，结果仍取决于语言运行时或用户程序如何处理创建失败
+- 迁移收益：
+  - 不再受同 UID 其它进程 / 线程数影响
+  - 口径和 `memory.max` 一样，都是 task-local 的 cgroup 预算
+- 相关背景：
+  - Java 回归与最终修复见 [`java-runtime-follow-up.md`](./java-runtime-follow-up.md)
+
 ### CPU
 
 - 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值
@@ -100,14 +124,14 @@ Linux 运行期现在分成两类：
 Linux runtime 需要：
 
 - cgroup v2 挂载点（默认 `/sys/fs/cgroup`）
-- `memory` controller 已启用
+- `memory` 与 `pids` controller 已启用
 - 一个可写、已委派的父 cgroup，用于创建每次运行的 task cgroup
 
 runner 的父 cgroup 选择顺序：
 
 1. 如果设置了 `RUNNER_CGROUP_PARENT`，优先使用它
 2. 否则从当前进程所在 cgroup 往上找最近的、可写的 domain cgroup：
-   - `subtree_control` 已包含 `memory`
+   - `subtree_control` 已包含 `memory` 和 `pids`
    - 没有 internal processes（root cgroup 除外）
 
 如需覆盖挂载点，可设置 `RUNNER_CGROUP_MOUNT`。

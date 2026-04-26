@@ -20,15 +20,15 @@ const (
 	cgroupParentEnv        = "RUNNER_CGROUP_PARENT"
 )
 
-type cgroupMemoryController struct {
+func newTaskController(setting *TaskConfig) (taskController, error) {
+	return newCgroupTaskController(setting.Memory, setting.MaxProcs)
+}
+
+type cgroupTaskController struct {
 	path string
 }
 
-func newMemoryController(setting *TaskConfig) (memoryController, error) {
-	return newCgroupMemoryController(setting.Memory)
-}
-
-func newCgroupMemoryController(limitMB int) (*cgroupMemoryController, error) {
+func newCgroupTaskController(limitMB int, maxProcs int) (*cgroupTaskController, error) {
 	mountRoot, err := detectCgroupMountRoot()
 	if err != nil {
 		return nil, err
@@ -39,14 +39,16 @@ func newCgroupMemoryController(limitMB int) (*cgroupMemoryController, error) {
 		return nil, err
 	}
 
-	controller := &cgroupMemoryController{
+	controller := &cgroupTaskController{
 		path: filepath.Join(parentPath, taskCgroupName()),
 	}
 	if err := os.Mkdir(controller.path, 0o755); err != nil {
 		return nil, fmt.Errorf("create task cgroup %q: %w", controller.path, err)
 	}
-	if err := controller.configure(limitMB); err != nil {
-		_ = controller.Cleanup()
+	if err := controller.configure(limitMB, maxProcs); err != nil {
+		if cleanupErr := controller.Cleanup(); cleanupErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("cleanup task cgroup %q: %w", controller.path, cleanupErr))
+		}
 		return nil, err
 	}
 
@@ -150,7 +152,7 @@ func findDelegatedCgroupParent(mountRoot string, currentCgroupPath string) (stri
 	}
 
 	return "", fmt.Errorf(
-		"no delegated cgroup parent with memory controller enabled found under %q; configure %s to a writable domain cgroup whose subtree_control includes memory",
+		"no delegated cgroup parent with required controllers enabled found under %q; configure %s to a writable domain cgroup whose subtree_control includes memory and pids",
 		mountRoot,
 		cgroupParentEnv,
 	)
@@ -192,6 +194,9 @@ func isUsableCgroupParent(mountRoot string, path string) (bool, string, error) {
 	if !containsWord(string(subtreeControl), "memory") {
 		return false, "memory controller is not enabled in subtree_control", nil
 	}
+	if !containsWord(string(subtreeControl), "pids") {
+		return false, "pids controller is not enabled in subtree_control", nil
+	}
 
 	if path != mountRoot {
 		procs, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
@@ -206,13 +211,14 @@ func isUsableCgroupParent(mountRoot string, path string) (bool, string, error) {
 	return true, "", nil
 }
 
-func (controller *cgroupMemoryController) configure(limitMB int) error {
+func (controller *cgroupTaskController) configure(limitMB int, maxProcs int) error {
 	requiredFiles := []string{
 		"cgroup.procs",
 		"memory.max",
 		"memory.events",
 		"memory.peak",
 		"memory.oom.group",
+		"pids.max",
 	}
 	for _, name := range requiredFiles {
 		if _, err := os.Stat(filepath.Join(controller.path, name)); err != nil {
@@ -225,6 +231,9 @@ func (controller *cgroupMemoryController) configure(limitMB int) error {
 	}
 	if err := writeCgroupFile(filepath.Join(controller.path, "memory.max"), strconv.FormatUint(uint64(limitMB)<<20, 10)); err != nil {
 		return fmt.Errorf("write memory.max: %w", err)
+	}
+	if err := writeCgroupFile(filepath.Join(controller.path, "pids.max"), strconv.Itoa(maxProcs)); err != nil {
+		return fmt.Errorf("write pids.max: %w", err)
 	}
 
 	swapMaxPath := filepath.Join(controller.path, "memory.swap.max")
@@ -239,7 +248,7 @@ func (controller *cgroupMemoryController) configure(limitMB int) error {
 	return nil
 }
 
-func (controller *cgroupMemoryController) Status() (memoryStatus, error) {
+func (controller *cgroupTaskController) MemoryStatus() (memoryStatus, error) {
 	peakBytes, err := readUintFromCgroupFile(filepath.Join(controller.path, "memory.peak"))
 	if err != nil {
 		return memoryStatus{}, fmt.Errorf("read memory.peak: %w", err)
@@ -256,11 +265,11 @@ func (controller *cgroupMemoryController) Status() (memoryStatus, error) {
 	}, nil
 }
 
-func (controller *cgroupMemoryController) MovePID(pid int) error {
+func (controller *cgroupTaskController) MovePID(pid int) error {
 	return writeCgroupFile(filepath.Join(controller.path, "cgroup.procs"), strconv.Itoa(pid))
 }
 
-func (controller *cgroupMemoryController) Cleanup() error {
+func (controller *cgroupTaskController) Cleanup() error {
 	if err := os.Remove(controller.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

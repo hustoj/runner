@@ -20,7 +20,6 @@ const (
 	childStageAlarm
 	childStageLimitFileSize
 	childStageLimitStack
-	childStageLimitNProc
 	childStageLimitOpenFiles
 	childStageLimitCore
 	childStageDupStdin
@@ -60,8 +59,6 @@ func (s childStartupStage) String() string {
 		return "set file-size rlimit"
 	case childStageLimitStack:
 		return "set stack rlimit"
-	case childStageLimitNProc:
-		return "set nproc rlimit"
 	case childStageLimitOpenFiles:
 		return "set open-file rlimit"
 	case childStageLimitCore:
@@ -122,7 +119,6 @@ type childProcessSpec struct {
 	cpuLimit     syscall.Rlimit
 	outputLimit  syscall.Rlimit
 	stackLimit   syscall.Rlimit
-	nProcLimit   syscall.Rlimit
 	noFileLimit  syscall.Rlimit
 	coreLimit    syscall.Rlimit
 	alarmSeconds uint64
@@ -151,9 +147,9 @@ func setAlarm(seconds uint64) syscall.Errno {
 }
 
 func (task *RunningTask) runProcess() error {
-	controller, err := newMemoryController(task.setting)
+	controller, err := newTaskController(task.setting)
 	if err != nil {
-		return fmt.Errorf("setup memory controller: %w", err)
+		return fmt.Errorf("setup task cgroup: %w", err)
 	}
 	defer func() {
 		if controller == nil {
@@ -219,7 +215,7 @@ func (task *RunningTask) runProcess() error {
 		return fmt.Errorf("child startup failed at %s: %w", failure.stage, failure.errno)
 	}
 
-	task.memoryCtrl = controller
+	task.taskCtrl = controller
 	controller = nil
 	task.process = NewProcess(pid)
 	log.Debugf("child pid is %d", pid)
@@ -264,10 +260,6 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		stackLimit: syscall.Rlimit{
 			Max: stackLimit,
 			Cur: stackLimit,
-		},
-		nProcLimit: syscall.Rlimit{
-			Max: uint64(task.setting.MaxProcs),
-			Cur: uint64(task.setting.MaxProcs),
 		},
 		noFileLimit: syscall.Rlimit{
 			Max: 16,
@@ -413,9 +405,6 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_STACK, &spec.stackLimit); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStageLimitStack, errno)
-	}
-	if errno := setResourceLimit(unix.RLIMIT_NPROC, &spec.nProcLimit); errno != 0 {
-		reportChildStartupFailure(startupPipeWriteFD, childStageLimitNProc, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_NOFILE, &spec.noFileLimit); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStageLimitOpenFiles, errno)

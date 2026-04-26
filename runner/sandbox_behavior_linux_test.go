@@ -31,7 +31,7 @@ func TestRunProcessSetsNoNewPrivsBeforeTraceLoop(t *testing.T) {
 	})
 }
 
-func TestRunProcessPlacesChildInDedicatedMemoryCgroup(t *testing.T) {
+func TestRunProcessPlacesChildInDedicatedTaskCgroup(t *testing.T) {
 	runInSandboxWorkspace(t, func(_ string) {
 		cfg := sandboxRunProcessConfig("/bin/true")
 
@@ -41,9 +41,9 @@ func TestRunProcessPlacesChildInDedicatedMemoryCgroup(t *testing.T) {
 		}
 		defer cleanup()
 
-		controller, ok := task.memoryCtrl.(*cgroupMemoryController)
+		controller, ok := task.taskCtrl.(*cgroupTaskController)
 		if !ok {
-			t.Fatalf("memory controller = %T, want *cgroupMemoryController", task.memoryCtrl)
+			t.Fatalf("task controller = %T, want *cgroupTaskController", task.taskCtrl)
 		}
 
 		mountRoot, err := detectCgroupMountRoot()
@@ -66,6 +66,14 @@ func TestRunProcessPlacesChildInDedicatedMemoryCgroup(t *testing.T) {
 		wantLimit := strconv.FormatUint(uint64(cfg.Memory)<<20, 10)
 		if strings.TrimSpace(string(content)) != wantLimit {
 			t.Fatalf("memory.max = %q, want %q", strings.TrimSpace(string(content)), wantLimit)
+		}
+
+		pidsContent, err := os.ReadFile(filepath.Join(controller.path, "pids.max"))
+		if err != nil {
+			t.Fatalf("os.ReadFile(pids.max) error = %v", err)
+		}
+		if strings.TrimSpace(string(pidsContent)) != strconv.Itoa(cfg.MaxProcs) {
+			t.Fatalf("pids.max = %q, want %q", strings.TrimSpace(string(pidsContent)), strconv.Itoa(cfg.MaxProcs))
 		}
 	})
 }
@@ -216,6 +224,7 @@ func sandboxRunProcessConfig(command string) *TaskConfig {
 		Memory:     64,
 		Output:     16,
 		Stack:      8,
+		MaxProcs:   16,
 		Command:    command,
 		RunUID:     -1,
 		RunGID:     -1,
@@ -233,8 +242,8 @@ func startSandboxedTask(t *testing.T, cfg *TaskConfig) (*RunningTask, func(), er
 	task := &RunningTask{}
 	task.Init(cfg)
 	if err := task.runProcess(); err != nil {
-		if isMemoryControllerSetupError(err) {
-			t.Skipf("cgroup memory backend unavailable: %v", err)
+		if isTaskCgroupSetupError(err) {
+			t.Skipf("task cgroup backend unavailable: %v", err)
 		}
 		return nil, func() {}, err
 	}
@@ -388,9 +397,9 @@ func isSandboxStartupExecUnavailable(err error) bool {
 	return strings.Contains(message, syscall.ENOENT.Error()) || strings.Contains(message, syscall.ENOEXEC.Error())
 }
 
-func isMemoryControllerSetupError(err error) bool {
+func isTaskCgroupSetupError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "setup memory controller")
+	return strings.Contains(err.Error(), "setup task cgroup")
 }

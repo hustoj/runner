@@ -2,6 +2,15 @@ package runner
 
 import "syscall"
 
+type syscallCheckResult uint8
+
+const (
+	syscallCheckOK syscallCheckResult = iota
+	syscallCheckViolation
+	syscallCheckTraceeGone
+	syscallCheckTracerError
+)
+
 type traceeState struct {
 	inSyscall         bool
 	prevSyscall       uint64 //nolint:unused // accessed in tracer_linux.go

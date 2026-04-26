@@ -13,7 +13,7 @@ type RunningTask struct {
 	Result      *Result
 	timeLimit   int64
 	memoryLimit int64
-	memoryCtrl  memoryController
+	taskCtrl    taskController
 }
 
 func (task *RunningTask) Init(setting *TaskConfig) {
@@ -175,8 +175,21 @@ func (task *RunningTask) trace() error {
 			break
 		}
 
-		if tracer.checkSyscall(process.CurrentPid) {
+		checkResult := tracer.checkSyscall(process.CurrentPid)
+		if checkResult == syscallCheckViolation {
 			log.Debugf("------- check syscall failed")
+			process.Kill()
+			task.Result.RetCode = RUNTIME_ERROR
+			break
+		}
+		if checkResult == syscallCheckTraceeGone {
+			log.Debugf("skip syscall inspection for pid=%d because tracee is already gone", process.CurrentPid)
+			task.parseRunningInfo()
+			task.checkLimit()
+			continue
+		}
+		if checkResult == syscallCheckTracerError {
+			log.Warnf("ptrace register read failed for pid=%d", process.CurrentPid)
 			process.Kill()
 			task.Result.RetCode = RUNTIME_ERROR
 			break
@@ -303,7 +316,7 @@ func (task *RunningTask) outOfTime() bool {
 }
 
 func (task *RunningTask) outOfMemory() bool {
-	if task.memoryCtrl == nil {
+	if task.taskCtrl == nil {
 		isMLE := task.Result.PeakMemory > task.memoryLimit
 		if isMLE {
 			log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
@@ -311,9 +324,9 @@ func (task *RunningTask) outOfMemory() bool {
 		return isMLE
 	}
 
-	status, err := task.memoryCtrl.Status()
+	status, err := task.taskCtrl.MemoryStatus()
 	if err != nil {
-		log.Infof("read memory controller status failed: %v", err)
+		log.Infof("read task memory status failed: %v", err)
 		return false
 	}
 	task.Result.PeakMemory = status.PeakMemoryKB
@@ -403,11 +416,11 @@ func (task *RunningTask) finalizeTraceResult() error {
 }
 
 func (task *RunningTask) refreshFinalMemoryResult() error {
-	if task.memoryCtrl == nil {
+	if task.taskCtrl == nil {
 		return nil
 	}
 
-	status, err := task.memoryCtrl.Status()
+	status, err := task.taskCtrl.MemoryStatus()
 	if err != nil {
 		return err
 	}
@@ -416,11 +429,11 @@ func (task *RunningTask) refreshFinalMemoryResult() error {
 }
 
 func (task *RunningTask) cleanupRuntimeResources() {
-	if task.memoryCtrl == nil {
+	if task.taskCtrl == nil {
 		return
 	}
-	if err := task.memoryCtrl.Cleanup(); err != nil {
-		log.Warnf("cleanup task memory controller failed: %v", err)
+	if err := task.taskCtrl.Cleanup(); err != nil {
+		log.Warnf("cleanup task cgroup failed: %v", err)
 	}
-	task.memoryCtrl = nil
+	task.taskCtrl = nil
 }

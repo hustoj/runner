@@ -53,3 +53,7 @@ socket, stat, statfs, sysinfo, unlink
 
 This list was derived from tracing OpenJDK 17+ on linux/amd64. Other JVM
 versions or architectures may require adjustments.
+
+The syscall list alone is not sufficient for current OpenJDK builds. The JVM
+also creates more than the default `MaxProcs: 16` threads during startup, so
+the Java fixture raises `MaxProcs` explicitly.

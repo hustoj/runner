@@ -18,7 +18,7 @@ type TaskConfig struct {
 	MemoryReserve int `default:"0"`   // Deprecated: ignored by the Linux runtime memory controller
 	Output        int `default:"16"`  // Output size limit in MB
 	Stack         int `default:"8"`   // Stack size limit in MB
-	MaxProcs      int `default:"16"`  // Max number of processes/threads (RLIMIT_NPROC)
+	MaxProcs      int `default:"16"`  // Max number of processes/threads per task cgroup (Linux cgroup v2 pids.max)
 
 	// Sandbox security settings
 	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
@@ -74,7 +74,7 @@ func (tc *TaskConfig) Validate() error {
 		return fmt.Errorf("stack must be >= 0 (got %d)", tc.Stack)
 	}
 	if tc.MaxProcs < 1 {
-		return fmt.Errorf("maxProcs must be >= 1 (got %d)", tc.MaxProcs)
+		return fmt.Errorf("maxProcs must be >= 1 so the task can start (got %d)", tc.MaxProcs)
 	}
 
 	if (tc.RunUID >= 0 && tc.RunGID < 0) || (tc.RunUID < 0 && tc.RunGID >= 0) {

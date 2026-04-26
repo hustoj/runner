@@ -3,11 +3,14 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 
 	"github.com/hustoj/runner/sec"
 )
+
+var ptraceGetRegs = syscall.PtraceGetRegs
 
 func (tracer *TracerDetect) setInSyscall(pid int, inSyscall bool) {
 	state := tracer.ensureTracee(pid)
@@ -27,17 +30,21 @@ func getName(syscallID uint64) string {
 	return name
 }
 
-func (tracer *TracerDetect) checkSyscall(pid int) bool {
+func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 	state, ok := tracer.getTracee(pid)
 	if !ok {
 		log.Warnf("checkSyscall called for unregistered pid %d", pid)
-		return true
+		return syscallCheckTraceeGone
 	}
 	var regs syscall.PtraceRegs
-	err := syscall.PtraceGetRegs(pid, &regs)
+	err := ptraceGetRegs(pid, &regs)
 	if err != nil {
-		log.Debugf("trace failed: %v", err)
-		return true
+		if errors.Is(err, syscall.ESRCH) {
+			log.Debugf("tracee pid=%d disappeared before regs fetch", pid)
+			return syscallCheckTraceeGone
+		}
+		log.Debugf("trace failed for pid=%d: %v", pid, err)
+		return syscallCheckTracerError
 	}
 
 	callID := getSyscallNumber(&regs)
@@ -47,7 +54,7 @@ func (tracer *TracerDetect) checkSyscall(pid int) bool {
 
 		if !tracer.callPolicy.CheckID(callID) {
 			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
-			return true
+			return syscallCheckViolation
 		}
 		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
 			log.Info(getName(callID))
@@ -65,5 +72,5 @@ func (tracer *TracerDetect) checkSyscall(pid int) bool {
 		log.Debugf("SYS_EXIT_GROUP")
 	}
 	tracer.setInSyscall(pid, !tracer.inSyscall(pid))
-	return false
+	return syscallCheckOK
 }

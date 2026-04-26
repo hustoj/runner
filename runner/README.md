@@ -27,6 +27,7 @@
 ## 资源限制契约
 
 - `Memory` 是 Linux task cgroup 的总内存预算，直接映射到 cgroup v2 `memory.max`。
+- `MaxProcs` 是 Linux task cgroup 的进程 / 线程总数预算，直接映射到 cgroup v2 `pids.max`。
 - `MemoryReserve` 已废弃，只为兼容旧 `case.json` 保留，Linux runtime 不再使用。
 - `Stack` 独立映射到 `RLIMIT_STACK`，不再与 `Memory` 复用同一上限。
 - 更完整的字段语义、单位和 signal 归类说明见 [`../docs/runner/resource-limits.md`](../docs/runner/resource-limits.md)。

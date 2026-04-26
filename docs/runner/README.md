@@ -1,17 +1,19 @@
 # docs/runner
 
-该子目录存放运行期行为的补充参考文档，包括 syscall 参考、资源限制契约以及 cgroup v2 内存实现说明。
+该子目录存放运行期行为的补充参考文档，包括 syscall 参考、资源限制契约、cgroup v2 task 限制实现，以及语言运行时相关 follow-up。
 
 ## 当前内容
 
 - `syscalls.md`：给出通用场景和 Java 场景常见的 syscall 清单，适合快速比对语言运行时需要的额外调用。
-- `resource-limits.md`：说明 `case.json` 中 CPU / Memory / Stack / Output 的运行期语义，以及 Linux 上的判题口径与硬限制关系。
-- `cgroup-v2-memory.md`：说明 Linux runtime 如何用 cgroup v2 统一内存 enforcement 与 verdict。
+- `resource-limits.md`：说明 `case.json` 中 CPU / Memory / Stack / Output / MaxProcs 的运行期语义，以及 Linux 上的判题口径与硬限制关系。
+- `cgroup-v2-memory.md`：说明 Linux runtime 如何用 cgroup v2 统一 memory / pids 这类 task 级资源限制。
+- `java-runtime-follow-up.md`：记录 cgroup migration 后 Java case 的根因分析，以及 `pids.max` / ptrace 修复为什么是最终方案。
 
 ## 适合来这里解决的问题
 
 - 想快速回忆默认 syscall 白名单大致长什么样
 - 想确认 Java 运行时为什么需要额外 syscall
+- 想回看 Java case 为什么不是内存问题而是 `MaxProcs` / ptrace 生命周期问题
 - 想确认 `Memory` 和 `Stack` 在 Linux 上分别落到哪些限制
 - 想了解 task cgroup 是怎么创建、加入和清理的
 - 想写文档或补测试时找一个简短参考

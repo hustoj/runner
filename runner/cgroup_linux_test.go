@@ -83,20 +83,43 @@ func TestResolveConfiguredCgroupParentRejectsEscapes(t *testing.T) {
 	}
 }
 
-func TestCgroupMemoryControllerStatusUsesPeakAndEvents(t *testing.T) {
-	controller := &cgroupMemoryController{path: t.TempDir()}
+func TestCgroupTaskControllerMemoryStatusUsesPeakAndEvents(t *testing.T) {
+	controller := &cgroupTaskController{path: t.TempDir()}
 	writeTestCgroupFile(t, filepath.Join(controller.path, "memory.peak"), "8193\n")
 	writeTestCgroupFile(t, filepath.Join(controller.path, "memory.events"), "low 0\nhigh 0\nmax 3\noom 1\noom_kill 0\n")
 
-	status, err := controller.Status()
+	status, err := controller.MemoryStatus()
 	if err != nil {
-		t.Fatalf("Status() error = %v", err)
+		t.Fatalf("MemoryStatus() error = %v", err)
 	}
 	if status.PeakMemoryKB != 9 {
-		t.Fatalf("Status() peak = %d, want 9", status.PeakMemoryKB)
+		t.Fatalf("MemoryStatus() peak = %d, want 9", status.PeakMemoryKB)
 	}
 	if !status.Exceeded() {
-		t.Fatal("Status() Exceeded() = false, want true when oom counter is non-zero")
+		t.Fatal("MemoryStatus() Exceeded() = false, want true when oom counter is non-zero")
+	}
+}
+
+func TestIsUsableCgroupParentRequiresPidsController(t *testing.T) {
+	mountRoot := t.TempDir()
+	parent := filepath.Join(mountRoot, "runner")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll(%q) error = %v", parent, err)
+	}
+
+	writeTestCgroupFile(t, filepath.Join(parent, "cgroup.type"), "domain\n")
+	writeTestCgroupFile(t, filepath.Join(parent, "cgroup.subtree_control"), "memory\n")
+	writeTestCgroupFile(t, filepath.Join(parent, "cgroup.procs"), "")
+
+	ok, reason, err := isUsableCgroupParent(mountRoot, parent)
+	if err != nil {
+		t.Fatalf("isUsableCgroupParent() error = %v", err)
+	}
+	if ok {
+		t.Fatal("isUsableCgroupParent() = true, want false when pids controller is missing")
+	}
+	if reason != "pids controller is not enabled in subtree_control" {
+		t.Fatalf("isUsableCgroupParent() reason = %q, want pids-controller rejection", reason)
 	}
 }
 

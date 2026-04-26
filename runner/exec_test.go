@@ -92,7 +92,7 @@ func TestApplyTerminationSignalTreatsSIGKILLAsMemoryLimitWhenControllerExceeded(
 
 	task := RunningTask{
 		Result: &Result{},
-		memoryCtrl: fakeMemoryController{
+		taskCtrl: fakeTaskController{
 			status: memoryStatus{
 				PeakMemoryKB: 2048,
 				OOMCount:     1,
@@ -114,7 +114,7 @@ func TestCheckPromotesRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing
 		Result: &Result{
 			RetCode: RUNTIME_ERROR,
 		},
-		memoryCtrl: fakeMemoryController{
+		taskCtrl: fakeTaskController{
 			status: memoryStatus{
 				PeakMemoryKB: 4096,
 				OOMCount:     1,

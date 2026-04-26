@@ -1,6 +1,9 @@
 MAKEFLAGS += -s
 
-.PHONY: default image compiler build-docker-runner build-docker-compiler prepare testall pre-commit-install pre-commit-run clean
+SANDBOX_BEHAVIOR_NONROOT_TESTS := TestRunProcessSetsNoNewPrivsBeforeTraceLoop|TestRunProcessPropagatesSandboxPermissionFailures
+SANDBOX_BEHAVIOR_ROOT_TESTS := TestRunProcessSetsCredentialsBeforeTraceLoop|TestRunProcessCreatesMountNamespaceBeforeTraceLoop|TestRunProcessAppliesChrootAndWorkDirBeforeTraceLoop
+
+.PHONY: default image compiler build-docker-runner build-docker-compiler prepare test-unit test-sandbox-behavior test-sandbox-behavior-root testall pre-commit-install pre-commit-run clean
 
 default:
 	go build -o bin/runner ./cmd/runner
@@ -20,6 +23,15 @@ build-docker-compiler:
 
 prepare:
 	go build -o bin/test ./cmd/test
+
+test-unit:
+	go test ./...
+
+test-sandbox-behavior:
+	go test ./runner -run '$(SANDBOX_BEHAVIOR_NONROOT_TESTS)'
+
+test-sandbox-behavior-root:
+	go test ./runner -run '$(SANDBOX_BEHAVIOR_ROOT_TESTS)'
 
 pre-commit-install:
 	pre-commit install

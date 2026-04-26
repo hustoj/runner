@@ -16,7 +16,7 @@
 
 仍需保证的执行条件：
 
-- [ ] 在具备 root 或等效 capability 的 Linux CI / 容器环境里稳定执行这组测试
+- [x] 在具备 root 或等效 capability 的 Linux CI / 容器环境里稳定执行这组测试（GitHub Actions 默认用户跑 `make test-unit`，额外用 privileged Docker 跑 `make test-sandbox-behavior-root`）
 - [ ] 如后续引入更多 namespace 组合，补充更细粒度的隔离断言
 
 ## 内存限制实现验证（原待验证项 A）

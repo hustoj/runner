@@ -29,7 +29,15 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
     ```sh
     cd runner
     make # will install go dependency
+    make test-unit
     make testall # Linux/amd64 integration check; run on your arm64 target host if needed
+    ```
+
+    Sandbox behavior checks can be run separately:
+
+    ```sh
+    make test-sandbox-behavior
+    sudo -E make test-sandbox-behavior-root
     ```
 
 ### `make testall` prerequisites
@@ -59,7 +67,7 @@ sudo apt-get install build-essential default-jdk
     make pre-commit-run
     ```
 
-    the same checks also run automatically in GitHub Actions for pushes to `main` / `master` and for pull requests.
+    the same formatting/lint checks and the Go test workflows also run automatically in GitHub Actions for pushes to `main` / `master` and for pull requests.
 
 5. Install docker
 

@@ -21,16 +21,16 @@
 
 ## 内存限制实现验证（原待验证项 A）
 
-**背景**：`RLIMIT_DATA` / `RLIMIT_AS` 使用 `(Memory + MemoryReserve) << 20`，真正判定 MLE 依赖 `/proc/<pid>/status` 的采样。
+**当前状态**：Linux runtime 已切换到 cgroup v2 memory controller，`Memory` 直接映射到 `memory.max`，最终 MLE 依赖 `memory.events` / `memory.peak`。
 
-待验证：
+后续仍建议补的回归项：
 
-- [ ] 当前 `MemoryReserve` 默认值 (32MB) 是否足够覆盖典型 C/C++/Java 程序的初始化开销
-- [ ] 快速分配后立即退出的程序（短生命周期 MLE）是否能被 `/proc` 采样捕获
-- [ ] 多进程场景下（Java fork 子线程），`refreshPeakMemoryFromProc` 按 thread group 聚合是否准确
-- [ ] 是否存在 RLIMIT_AS 过紧导致 `mmap` 失败的误判场景
+- [ ] 在不同 systemd / 容器 delegation 形态下确认自动父 cgroup 选择都能稳定命中
+- [ ] 为 cgroup `oom` 但进程自行处理 `ENOMEM` 的场景补一条行为测试，确认最终仍记 `MEMORY_LIMIT`
+- [ ] 为 managed runtime（尤其 JVM）补一组“总预算 vs 堆参数”示例用例，避免继续依赖旧 `MemoryReserve` 心智模型
+- [ ] 评估是否需要额外暴露 `memory.current` / `memory.stat` 诊断信息，帮助分析复杂语言运行时的预算分布
 
-**验证方式**：需准备针对性测试用例，在 Linux 真机上实测。
+**验证方式**：需准备针对性测试用例，在 Linux 真机或具备 cgroup v2 delegation 的 CI / 容器环境里实测。
 
 ## Compiler 默认日志路径（原待验证项 B）
 

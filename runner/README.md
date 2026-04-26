@@ -15,6 +15,7 @@
 - `config.go`：`TaskConfig`，即 `case.json` 的主要字段定义与校验逻辑。
 - `exec.go`：`RunningTask` 生命周期，串起启动、trace、限额检查和结果判定。
 - `exec_linux.go`：Linux 下子进程启动细节，包括资源限制、IO 重定向与沙箱应用。
+- `cgroup_linux.go`：Linux 下的 cgroup v2 memory controller 接入，包括父 cgroup 选择、task cgroup 创建、指标读取与清理。
 - `process*.go`：对子进程 `wait`、ptrace 选项、状态判断的封装。
 - `tracer*.go`：syscall 读取与判定逻辑，核心标识符是 `TracerDetect`。
 - `sec.go`：把 syscall 名称列表转换成可执行的 `CallPolicy`。
@@ -25,8 +26,8 @@
 
 ## 资源限制契约
 
-- `Memory` 是判题内存上限，按 Linux 上的 RSS 类指标判定。
-- `MemoryReserve` 是给 `RLIMIT_DATA` / `RLIMIT_AS` 的固定余量，用来避免地址空间硬限制过早把结果打成 `RE`。
+- `Memory` 是 Linux task cgroup 的总内存预算，直接映射到 cgroup v2 `memory.max`。
+- `MemoryReserve` 已废弃，只为兼容旧 `case.json` 保留，Linux runtime 不再使用。
 - `Stack` 独立映射到 `RLIMIT_STACK`，不再与 `Memory` 复用同一上限。
 - 更完整的字段语义、单位和 signal 归类说明见 [`../docs/runner/resource-limits.md`](../docs/runner/resource-limits.md)。
 

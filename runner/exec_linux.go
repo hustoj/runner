@@ -20,8 +20,6 @@ const (
 	childStageAlarm
 	childStageLimitFileSize
 	childStageLimitStack
-	childStageLimitData
-	childStageLimitAddressSpace
 	childStageLimitNProc
 	childStageLimitOpenFiles
 	childStageLimitCore
@@ -29,6 +27,7 @@ const (
 	childStageDupStdout
 	childStageDupStderr
 	childStageSetProcessGroup
+	childStageAwaitCgroupJoin
 	childStageSandboxNamespaces
 	childStageSandboxInvalidCredentials
 	childStageSandboxChroot
@@ -61,10 +60,6 @@ func (s childStartupStage) String() string {
 		return "set file-size rlimit"
 	case childStageLimitStack:
 		return "set stack rlimit"
-	case childStageLimitData:
-		return "set data rlimit"
-	case childStageLimitAddressSpace:
-		return "set address-space rlimit"
 	case childStageLimitNProc:
 		return "set nproc rlimit"
 	case childStageLimitOpenFiles:
@@ -79,6 +74,8 @@ func (s childStartupStage) String() string {
 		return "dup stderr"
 	case childStageSetProcessGroup:
 		return "set process group"
+	case childStageAwaitCgroupJoin:
+		return "await parent cgroup join"
 	case childStageSandboxNamespaces:
 		return "setup namespaces"
 	case childStageSandboxInvalidCredentials:
@@ -119,17 +116,16 @@ type childExecSpec struct {
 }
 
 type childProcessSpec struct {
-	io              childIOFiles
-	exec            childExecSpec
-	sandbox         childSandboxSpec
-	cpuLimit        syscall.Rlimit
-	outputLimit     syscall.Rlimit
-	stackLimit      syscall.Rlimit
-	hardMemoryLimit syscall.Rlimit
-	nProcLimit      syscall.Rlimit
-	noFileLimit     syscall.Rlimit
-	coreLimit       syscall.Rlimit
-	alarmSeconds    uint64
+	io           childIOFiles
+	exec         childExecSpec
+	sandbox      childSandboxSpec
+	cpuLimit     syscall.Rlimit
+	outputLimit  syscall.Rlimit
+	stackLimit   syscall.Rlimit
+	nProcLimit   syscall.Rlimit
+	noFileLimit  syscall.Rlimit
+	coreLimit    syscall.Rlimit
+	alarmSeconds uint64
 }
 
 func openChildIOFile(path string, flags int, perm uint32) (int, error) {
@@ -155,33 +151,65 @@ func setAlarm(seconds uint64) syscall.Errno {
 }
 
 func (task *RunningTask) runProcess() error {
+	controller, err := newMemoryController(task.setting)
+	if err != nil {
+		return fmt.Errorf("setup memory controller: %w", err)
+	}
+	defer func() {
+		if controller == nil {
+			return
+		}
+		_ = controller.Cleanup()
+	}()
+
 	spec, err := task.prepareChildProcessSpec()
 	if err != nil {
 		return err
 	}
 
-	pipeFDs := [2]int{-1, -1}
-	if err := syscall.Pipe2(pipeFDs[:], syscall.O_CLOEXEC); err != nil {
+	startupPipeFDs := [2]int{-1, -1}
+	if err := syscall.Pipe2(startupPipeFDs[:], syscall.O_CLOEXEC); err != nil {
 		closeChildIOFiles(spec.io)
 		return fmt.Errorf("create child startup pipe: %w", err)
+	}
+
+	gatePipeFDs := [2]int{-1, -1}
+	if err := syscall.Pipe2(gatePipeFDs[:], syscall.O_CLOEXEC); err != nil {
+		closeChildIOFiles(spec.io)
+		closePipeFDs(startupPipeFDs)
+		return fmt.Errorf("create child cgroup gate pipe: %w", err)
 	}
 
 	pid, errno := fork()
 	if errno != 0 || pid < 0 {
 		closeChildIOFiles(spec.io)
-		closePipeFDs(pipeFDs)
+		closePipeFDs(startupPipeFDs)
+		closePipeFDs(gatePipeFDs)
 		return fmt.Errorf("fork child: %w", errno)
 	}
 
 	if pid == 0 {
-		runChildProcess(spec, pipeFDs[0], pipeFDs[1])
+		runChildProcess(spec, startupPipeFDs[0], startupPipeFDs[1], gatePipeFDs[0], gatePipeFDs[1])
 	}
 
 	closeChildIOFiles(spec.io)
-	_ = syscall.Close(pipeFDs[1])
+	_ = syscall.Close(startupPipeFDs[1])
+	_ = syscall.Close(gatePipeFDs[0])
 
-	failure, err := readChildStartupFailure(pipeFDs[0])
-	_ = syscall.Close(pipeFDs[0])
+	if err := controller.MovePID(pid); err != nil {
+		_ = syscall.Close(startupPipeFDs[0])
+		_ = syscall.Close(gatePipeFDs[1])
+		waitChildStartupFailure(pid)
+		return fmt.Errorf("move child %d into task cgroup: %w", pid, err)
+	}
+	if err := releaseChildCgroupGate(gatePipeFDs[1]); err != nil {
+		_ = syscall.Close(startupPipeFDs[0])
+		waitChildStartupFailure(pid)
+		return fmt.Errorf("release child cgroup gate: %w", err)
+	}
+
+	failure, err := readChildStartupFailure(startupPipeFDs[0])
+	_ = syscall.Close(startupPipeFDs[0])
 	if err != nil {
 		waitChildStartupFailure(pid)
 		return fmt.Errorf("read child startup pipe: %w", err)
@@ -191,6 +219,8 @@ func (task *RunningTask) runProcess() error {
 		return fmt.Errorf("child startup failed at %s: %w", failure.stage, failure.errno)
 	}
 
+	task.memoryCtrl = controller
+	controller = nil
 	task.process = NewProcess(pid)
 	log.Debugf("child pid is %d", pid)
 	return nil
@@ -216,7 +246,6 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 
 	timeLimit := uint64(task.setting.CPU)
 	stackLimit := uint64(task.setting.Stack) << 20
-	hardMemoryLimit := (uint64(task.setting.Memory) + uint64(task.setting.MemoryReserve)) << 20
 	enforcedCPULimit := timeLimit + 1
 	enforcedOutputLimit := uint64(task.setting.Output) << 20
 
@@ -235,10 +264,6 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		stackLimit: syscall.Rlimit{
 			Max: stackLimit,
 			Cur: stackLimit,
-		},
-		hardMemoryLimit: syscall.Rlimit{
-			Max: hardMemoryLimit,
-			Cur: hardMemoryLimit,
 		},
 		nProcLimit: syscall.Rlimit{
 			Max: uint64(task.setting.MaxProcs),
@@ -360,54 +385,62 @@ func waitChildStartupFailure(pid int) {
 	_, _ = syscall.Wait4(pid, &status, 0, &rusage)
 }
 
-func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
-	rawClose(pipeReadFD)
+func releaseChildCgroupGate(fd int) error {
+	defer func() {
+		_ = syscall.Close(fd)
+	}()
+	_, err := syscall.Write(fd, []byte{1})
+	return err
+}
+
+func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteFD, gatePipeReadFD, gatePipeWriteFD int) {
+	rawClose(startupPipeReadFD)
+	rawClose(gatePipeWriteFD)
+
+	if errno := awaitParentCgroupJoin(gatePipeReadFD); errno != 0 {
+		reportChildStartupFailure(startupPipeWriteFD, childStageAwaitCgroupJoin, errno)
+	}
+	rawClose(gatePipeReadFD)
 
 	if errno := setResourceLimit(syscall.RLIMIT_CPU, &spec.cpuLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitCPU, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitCPU, errno)
 	}
 	if errno := setAlarm(spec.alarmSeconds); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageAlarm, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageAlarm, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_FSIZE, &spec.outputLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitFileSize, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitFileSize, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_STACK, &spec.stackLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitStack, errno)
-	}
-	if errno := setResourceLimit(syscall.RLIMIT_DATA, &spec.hardMemoryLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitData, errno)
-	}
-	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.hardMemoryLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitAddressSpace, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitStack, errno)
 	}
 	if errno := setResourceLimit(unix.RLIMIT_NPROC, &spec.nProcLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitNProc, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitNProc, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_NOFILE, &spec.noFileLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitOpenFiles, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitOpenFiles, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_CORE, &spec.coreLimit); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageLimitCore, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageLimitCore, errno)
 	}
 	if errno := dupToStandardFD(spec.io.stdin, syscall.Stdin); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageDupStdin, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageDupStdin, errno)
 	}
 	if errno := dupToStandardFD(spec.io.stdout, syscall.Stdout); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageDupStdout, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageDupStdout, errno)
 	}
 	if errno := dupToStandardFD(spec.io.stderr, syscall.Stderr); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageDupStderr, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageDupStderr, errno)
 	}
 	if errno := rawSetpgid(0, 0); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStageSetProcessGroup, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStageSetProcessGroup, errno)
 	}
 
 	if failure := applySandboxInChild(spec.sandbox); failure.failed() {
-		reportChildStartupFailure(pipeWriteFD, failure.stage, failure.errno)
+		reportChildStartupFailure(startupPipeWriteFD, failure.stage, failure.errno)
 	}
 	if errno := ptraceTraceme(); errno != 0 {
-		reportChildStartupFailure(pipeWriteFD, childStagePtraceTraceme, errno)
+		reportChildStartupFailure(startupPipeWriteFD, childStagePtraceTraceme, errno)
 	}
 
 	var argvPtr uintptr
@@ -425,7 +458,7 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 		argvPtr,
 		envPtr,
 	)
-	reportChildStartupFailure(pipeWriteFD, childStageExec, errno)
+	reportChildStartupFailure(startupPipeWriteFD, childStageExec, errno)
 }
 
 func errnoFromError(err error, fallback syscall.Errno) syscall.Errno {
@@ -459,6 +492,31 @@ func rawClose(fd int) {
 		return
 	}
 	_, _, _ = syscall.RawSyscall(syscall.SYS_CLOSE, uintptr(fd), 0, 0)
+}
+
+func awaitParentCgroupJoin(fd int) syscall.Errno {
+	var gate [1]byte
+	for {
+		n, _, errno := syscall.RawSyscall(
+			syscall.SYS_READ,
+			uintptr(fd),
+			uintptr(unsafe.Pointer(&gate[0])),
+			uintptr(len(gate)),
+		)
+		if errno == syscall.EINTR {
+			continue
+		}
+		if errno != 0 {
+			return errno
+		}
+		if n == 0 {
+			return syscall.EPIPE
+		}
+		if gate[0] == 1 {
+			return 0
+		}
+		return syscall.EINVAL
+	}
 }
 
 func rawSetrlimit(resource int, limit *syscall.Rlimit) syscall.Errno {

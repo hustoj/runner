@@ -31,6 +31,45 @@ func TestRunProcessSetsNoNewPrivsBeforeTraceLoop(t *testing.T) {
 	})
 }
 
+func TestRunProcessPlacesChildInDedicatedMemoryCgroup(t *testing.T) {
+	runInSandboxWorkspace(t, func(_ string) {
+		cfg := sandboxRunProcessConfig("/bin/true")
+
+		task, cleanup, err := startSandboxedTask(t, cfg)
+		if err != nil {
+			t.Fatalf("runProcess() error = %v", err)
+		}
+		defer cleanup()
+
+		controller, ok := task.memoryCtrl.(*cgroupMemoryController)
+		if !ok {
+			t.Fatalf("memory controller = %T, want *cgroupMemoryController", task.memoryCtrl)
+		}
+
+		mountRoot, err := detectCgroupMountRoot()
+		if err != nil {
+			t.Fatalf("detectCgroupMountRoot() error = %v", err)
+		}
+		gotCgroupPath, err := readProcCgroupV2Path(task.process.Pid)
+		if err != nil {
+			t.Fatalf("readProcCgroupV2Path() error = %v", err)
+		}
+		wantCgroupPath := "/" + strings.TrimPrefix(strings.TrimPrefix(controller.path, mountRoot), string(os.PathSeparator))
+		if gotCgroupPath != wantCgroupPath {
+			t.Fatalf("child cgroup path = %q, want %q", gotCgroupPath, wantCgroupPath)
+		}
+
+		content, err := os.ReadFile(filepath.Join(controller.path, "memory.max"))
+		if err != nil {
+			t.Fatalf("os.ReadFile(memory.max) error = %v", err)
+		}
+		wantLimit := strconv.FormatUint(uint64(cfg.Memory)<<20, 10)
+		if strings.TrimSpace(string(content)) != wantLimit {
+			t.Fatalf("memory.max = %q, want %q", strings.TrimSpace(string(content)), wantLimit)
+		}
+	})
+}
+
 func TestRunProcessPropagatesSandboxPermissionFailures(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("requires non-root to validate privileged sandbox failure propagation")
@@ -173,15 +212,14 @@ func TestRunProcessAppliesChrootAndWorkDirBeforeTraceLoop(t *testing.T) {
 
 func sandboxRunProcessConfig(command string) *TaskConfig {
 	return &TaskConfig{
-		CPU:           1,
-		Memory:        64,
-		MemoryReserve: 32,
-		Output:        16,
-		Stack:         8,
-		Command:       command,
-		RunUID:        -1,
-		RunGID:        -1,
-		NoNewPrivs:    true,
+		CPU:        1,
+		Memory:     64,
+		Output:     16,
+		Stack:      8,
+		Command:    command,
+		RunUID:     -1,
+		RunGID:     -1,
+		NoNewPrivs: true,
 	}
 }
 
@@ -195,6 +233,9 @@ func startSandboxedTask(t *testing.T, cfg *TaskConfig) (*RunningTask, func(), er
 	task := &RunningTask{}
 	task.Init(cfg)
 	if err := task.runProcess(); err != nil {
+		if isMemoryControllerSetupError(err) {
+			t.Skipf("cgroup memory backend unavailable: %v", err)
+		}
 		return nil, func() {}, err
 	}
 
@@ -202,6 +243,7 @@ func startSandboxedTask(t *testing.T, cfg *TaskConfig) (*RunningTask, func(), er
 		if task.process != nil {
 			task.process.Kill()
 		}
+		task.cleanupRuntimeResources()
 	}
 	return task, cleanup, nil
 }
@@ -256,6 +298,19 @@ func readProcStatusFields(pid int, keys ...string) (map[string][]string, error) 
 
 func readProcLink(pid int, name string) (string, error) {
 	return os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), name))
+}
+
+func readProcCgroupV2Path(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cgroup"))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "0::") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "0::")), nil
+		}
+	}
+	return "", fmt.Errorf("cgroup v2 path not found in /proc/%d/cgroup", pid)
 }
 
 func firstField(values []string) string {
@@ -331,4 +386,11 @@ func isSandboxStartupExecUnavailable(err error) bool {
 		return false
 	}
 	return strings.Contains(message, syscall.ENOENT.Error()) || strings.Contains(message, syscall.ENOEXEC.Error())
+}
+
+func isMemoryControllerSetupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "setup memory controller")
 }

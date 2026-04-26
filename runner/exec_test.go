@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func waitStatusForExit(t *testing.T, code int) syscall.WaitStatus {
@@ -83,4 +84,45 @@ func TestApplyTerminationSignalKeepsRuntimeErrorForSIGKILLWithinLimits(t *testin
 	task.applyTerminationSignal(syscall.SIGKILL)
 
 	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
+}
+
+func TestApplyTerminationSignalTreatsSIGKILLAsMemoryLimitWhenControllerExceeded(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{},
+		memoryCtrl: fakeMemoryController{
+			status: memoryStatus{
+				PeakMemoryKB: 2048,
+				OOMCount:     1,
+			},
+		},
+	}
+	task.Result.Init()
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+}
+
+func TestCheckPromotesRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{
+			RetCode: RUNTIME_ERROR,
+		},
+		memoryCtrl: fakeMemoryController{
+			status: memoryStatus{
+				PeakMemoryKB: 4096,
+				OOMCount:     1,
+			},
+		},
+	}
+
+	task.check()
+
+	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
 }

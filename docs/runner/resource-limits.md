@@ -9,13 +9,12 @@
   - 语义：判题使用的 CPU 时间上限
 - `Memory`
   - 单位：MB
-  - 语义：判题使用的内存上限
-  - 判题口径是 RSS 类指标，不是虚拟地址空间总量
+  - 语义：任务的**总内存预算**
+  - Linux 运行时直接把它映射到 cgroup v2 `memory.max`
 - `MemoryReserve`
   - 单位：MB
-  - 默认值：`32`
-  - 语义：附加到 `RLIMIT_DATA` / `RLIMIT_AS` 的固定余量
-  - 目的：给地址空间、堆分配和运行时开销留出缓冲，避免硬限制早于判题逻辑触发
+  - 状态：**已废弃**
+  - Linux 运行时不再使用该字段；保留它只是为了兼容旧 `case.json`
 - `Stack`
   - 单位：MB
   - 语义：独立的栈上限，直接映射到 `RLIMIT_STACK`
@@ -23,92 +22,101 @@
   - 单位：MB
   - 语义：输出文件大小上限
 
-## 2. 判题层与内核兜底层
+## 2. 限制模型总览
 
-`runner` 同时存在两套限制：
+Linux 运行期现在分成两类：
 
-1. 判题层
-   - 决定最终是否返回 `TIME_LIMIT` / `MEMORY_LIMIT`
-   - 指标来自 `wait4` 和 `/proc/<pid>/status`
-2. 内核兜底层
-   - 由 `setrlimit` 和 `alarm` 实现
-   - 负责在判题层来不及介入时兜住失控进程
+1. **统一口径限制**
+   - 目前只有 Memory
+   - enforcement 与 verdict 都来自 cgroup v2
+2. **判题层 + 内核兜底**
+   - 目前是 CPU / Output / Stack
+   - 分别由 trace 结果、signal、`setrlimit` 与 `alarm` 共同决定
 
-这两层故意不是同一数值。
+这意味着：
 
-## 3. 具体落点
+- Memory 不再是“采样值 + 地址空间 workaround”的双轨模型
+- 如果 cgroup v2 memory backend 不可用，runner 会**明确启动失败**
+- 不会再静默退回 `RLIMIT_DATA` / `RLIMIT_AS`
+
+## 3. Memory 在 Linux 上的具体落点
+
+### 3.1 enforcement
+
+每次运行会创建一个独立 task cgroup，并写入：
+
+- `memory.max = Memory << 20`
+- `memory.oom.group = 1`
+- `memory.swap.max = 0`（如果内核暴露该文件）
+
+子进程在 `fork()` 后会先阻塞，父进程先把 child pid 写入 `cgroup.procs`，再放行 child 继续执行沙箱、ptrace 和 `execve()`。这样可以保证后续 `exec` 与运行时分配都记到目标 cgroup 里。
+
+### 3.2 结果采集
+
+- `PeakMemory`
+  - 来自 cgroup v2 `memory.peak`
+  - runner 对外仍以 `KB` 输出
+- `RusageMemory`
+  - 仍然来自 `wait4(...).ru_maxrss` 聚合
+  - 只用于诊断，不再参与最终 MLE 判定
+
+### 3.3 MLE 判定
+
+最终满足以下任一条件，就会记为 `MEMORY_LIMIT`：
+
+- `memory.events.oom > 0`
+- `memory.events.oom_kill > 0`
+
+注意：
+
+- `memory.events.max` 只表示到过 `memory.max` 边界并触发过回收，不单独作为 MLE 判定条件
+- 因此 `PeakMemory` 字段现在主要是**展示最终峰值**，不是 verdict 的唯一来源
+
+## 4. 其它资源限制
 
 ### CPU
 
 - 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值
-- 这表示“总消耗 CPU”，不是 wall-clock 时间；多线程并行时，该值可能明显大于实际经过时间
 - 结果判定：超过 `CPU` 后记为 `TIME_LIMIT`
 - 内核兜底：
-  - `RLIMIT_CPU.Cur = CPU + 1`
-  - `RLIMIT_CPU.Max = CPU + 1`
+  - `RLIMIT_CPU = CPU + 1`
   - `alarm = CPU + 5`
-  - `Cur` 与 `Max` 保持一致，避免在默认允许 `prlimit64` 时被用户程序自行放宽 CPU 限制
 
-### Memory
+### Output
 
-- 判题口径：
-  - `PeakMemory`：最终用于判题的内存指标；优先按 thread group 去重后汇总 `/proc/<pid>/status` 中的 `VmHWM`
-  - `RusageMemory`：按 thread group 分组后，取每组 `wait4(...).ru_maxrss` 的最大值，再对各组求和；只用于诊断和补齐 `/proc` 未及时观测到的峰值
-  - 对 root tracee，会先扣除 exec 之前 bootstrap 阶段的 `ru_maxrss` 基线，避免把 launcher 自身的 RSS 噪音计入判题峰值
-- 两者都按 `KB` 记录，且都偏向 RSS / 常驻内存口径
-- 结果判定：
-  - `PeakMemory > Memory`
-  - 满足即记为 `MEMORY_LIMIT`
 - 内核兜底：
-  - `RLIMIT_DATA = Memory + MemoryReserve`
-  - `RLIMIT_AS = Memory + MemoryReserve`
+  - `RLIMIT_FSIZE = Output`
+- `SIGXFSZ` 会被映射为 `OUTPUT_LIMIT`
 
 ### Stack
 
 - 内核兜底：
   - `RLIMIT_STACK = Stack`
-- 当前判题逻辑不会把所有栈相关失败自动归类为 `MEMORY_LIMIT`
-- 如果程序因栈扩展失败触发 `SIGSEGV`，当前通常会落到 `RUNTIME_ERROR`
+- 当前并不会把所有栈相关失败统一归到 `MEMORY_LIMIT`
+- 如果程序因为栈扩展失败触发 `SIGSEGV`，通常仍会落到 `RUNTIME_ERROR`
 
-### Output
+## 5. 部署要求
 
-- 内核兜底：
-  - `RLIMIT_FSIZE.Cur = Output`
-  - `RLIMIT_FSIZE.Max = Output`
-- `SIGXFSZ` 会被映射为 `OUTPUT_LIMIT`
-- `Cur` 与 `Max` 保持一致，避免用户程序通过 `prlimit64` 把输出上限抬高到更大的 hard limit
+Linux runtime 需要：
 
-## 4. 为什么 `MemoryReserve` 用固定余量
+- cgroup v2 挂载点（默认 `/sys/fs/cgroup`）
+- `memory` controller 已启用
+- 一个可写、已委派的父 cgroup，用于创建每次运行的 task cgroup
 
-旧实现会把 `RLIMIT_DATA` / `RLIMIT_AS` 绑定到 `Memory` 的倍率值。这个模型有两个问题：
+runner 的父 cgroup 选择顺序：
 
-- 倍率缺少明确契约，外部无法推导真实硬限制
-- 内存题越大，地址空间硬限制被放得越夸张
+1. 如果设置了 `RUNNER_CGROUP_PARENT`，优先使用它
+2. 否则从当前进程所在 cgroup 往上找最近的、可写的 domain cgroup：
+   - `subtree_control` 已包含 `memory`
+   - 没有 internal processes（root cgroup 除外）
 
-固定余量更符合当前实现的职责划分：
+如需覆盖挂载点，可设置 `RUNNER_CGROUP_MOUNT`。
 
-- `Memory` 负责判题
-- `MemoryReserve` 负责兜底
+## 6. 迁移建议
 
-这和 CPU 路径里“判题值 + 固定缓冲”的设计是一致的。
-
-## 5. 事件归类
-
-当前 signal 到结果码的直接映射如下：
-
-- `SIGALRM` / `SIGXCPU` -> `TIME_LIMIT`
-- `SIGXFSZ` -> `OUTPUT_LIMIT`
-- 其他 signal -> `RUNTIME_ERROR`
-
-因此内存和栈相关事件要分两种情况看：
-
-- 如果判题层已经观测到 `PeakMemory` 超出 `Memory`，最终会记为 `MEMORY_LIMIT`
-- 如果内核硬限制先触发，而判题层尚未观测到 RSS 超限，程序可能表现为分配失败、`SIGSEGV` 或非零退出码，最终记为 `RUNTIME_ERROR`
-
-`MemoryReserve` 的存在，就是为了尽量减少第二类“硬限制过早触发”的情况。
-
-## 6. 调整建议
-
-- C / C++：默认 `MemoryReserve = 32` 一般足够
-- 运行时较重的语言：可以按语言特性适当增大 `MemoryReserve`
-- 如果要把地址空间失败、栈溢出等事件也统一归到 `MEMORY_LIMIT`，需要额外设计更细的事件归类逻辑，不能只靠 `setrlimit`
+- 新的 Linux 契约里，`Memory` 是**总预算**，不是 RSS-like 采样阈值
+- 管理型运行时要在这个总预算里自己切 heap / metaspace / code cache
+- 例如 JVM 不应再把 `-Xmx` 直接顶到 `Memory`
+- 旧的 `MemoryReserve` workaround 已经移除；如果旧部署依赖它，需要改成：
+  - 提供合适的 cgroup v2 delegation
+  - 重新校准语言运行时参数

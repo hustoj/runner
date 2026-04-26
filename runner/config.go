@@ -14,8 +14,8 @@ import (
 type TaskConfig struct {
 	// Resource limits
 	CPU           int `default:"3"`   // CPU time limit in seconds
-	Memory        int `default:"256"` // Judged memory limit in MB
-	MemoryReserve int `default:"32"`  // Extra MB reserved for RLIMIT_DATA / RLIMIT_AS
+	Memory        int `default:"256"` // Total task memory budget in MB (Linux cgroup v2 memory.max)
+	MemoryReserve int `default:"0"`   // Deprecated: ignored by the Linux runtime memory controller
 	Output        int `default:"16"`  // Output size limit in MB
 	Stack         int `default:"8"`   // Stack size limit in MB
 	MaxProcs      int `default:"16"`  // Max number of processes/threads (RLIMIT_NPROC)
@@ -52,6 +52,8 @@ type TaskConfig struct {
 }
 
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
+
+const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
 
 // Validate checks if the configuration is valid.
 // Returns an error if any required constraints are violated.
@@ -94,11 +96,20 @@ func (tc *TaskConfig) Validate() error {
 
 // ValidationWarnings returns non-fatal configuration diagnostics.
 func (tc *TaskConfig) ValidationWarnings() []string {
+	var warnings []string
+
 	if tc.RunUID < 0 && (tc.UseMountNS || tc.UsePIDNS || tc.UseIPCNS || tc.UseUTSNS || tc.UseNetNS) {
-		return []string{namespacePrivilegeWarning}
+		warnings = append(warnings, namespacePrivilegeWarning)
 	}
 
-	return nil
+	if tc.MemoryReserve > 0 {
+		warnings = append(warnings, memoryReserveDeprecatedWarning)
+	}
+
+	if len(warnings) == 0 {
+		return nil
+	}
+	return warnings
 }
 
 // LogValidationWarnings emits non-fatal configuration diagnostics.

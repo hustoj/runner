@@ -13,6 +13,7 @@ type RunningTask struct {
 	Result      *Result
 	timeLimit   int64
 	memoryLimit int64
+	memoryCtrl  memoryController
 }
 
 func (task *RunningTask) Init(setting *TaskConfig) {
@@ -33,6 +34,7 @@ func (task *RunningTask) Run() error {
 	if err := task.runProcess(); err != nil {
 		return err
 	}
+	defer task.cleanupRuntimeResources()
 	return task.trace()
 }
 
@@ -66,12 +68,10 @@ func (task *RunningTask) trace() error {
 		log.Infof("initial wait failed: %v", err)
 		task.Result.RetCode = RUNTIME_ERROR
 		process.Kill()
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 	if !alive {
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 	if process.Exited() {
 		log.Infof("program exited before tracing loop")
@@ -79,13 +79,11 @@ func (task *RunningTask) trace() error {
 		process.RemoveTracee(process.CurrentPid)
 		task.parseRunningInfo()
 		task.applyExitCode(process.Status)
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 	if !process.IsInitialTraceStop() {
 		task.handleBrokenTraceStop("unexpected initial ptrace stop")
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 	process.SetThreadGroup(process.Pid, process.Pid)
 	process.SetRusageOffset(process.Pid, process.Rusage.Maxrss)
@@ -94,14 +92,12 @@ func (task *RunningTask) trace() error {
 		task.Result.RetCode = RUNTIME_ERROR
 		process.Kill()
 		task.parseRunningInfo()
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 	if !process.Continue() {
 		log.Infof("Program not alive after ptrace setup")
 		task.parseRunningInfo()
-		task.check()
-		return nil
+		return task.finalizeTraceResult()
 	}
 
 	for {
@@ -195,8 +191,7 @@ func (task *RunningTask) trace() error {
 		}
 
 	}
-	task.check()
-	return nil
+	return task.finalizeTraceResult()
 }
 
 func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetect) bool {
@@ -276,13 +271,10 @@ func (task *RunningTask) applyTerminationSignal(signal os.Signal) {
 
 func (task *RunningTask) check() {
 	log.Debug(task.Result.String())
-	if !task.Result.isAccept() {
-		return
-	}
-	if task.outOfMemory() {
+	if task.outOfMemory() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == RUNTIME_ERROR) {
 		task.Result.RetCode = MEMORY_LIMIT
 	}
-	if task.outOfTime() {
+	if task.outOfTime() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == MEMORY_LIMIT) {
 		task.Result.RetCode = TIME_LIMIT
 	}
 }
@@ -311,11 +303,31 @@ func (task *RunningTask) outOfTime() bool {
 }
 
 func (task *RunningTask) outOfMemory() bool {
-	// PeakMemory comes from the traced program's /proc status and does not
-	// include bootstrap Go runtime noise the way wait4 rusage can.
-	isMLE := task.Result.PeakMemory > task.memoryLimit
+	if task.memoryCtrl == nil {
+		isMLE := task.Result.PeakMemory > task.memoryLimit
+		if isMLE {
+			log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
+		}
+		return isMLE
+	}
+
+	status, err := task.memoryCtrl.Status()
+	if err != nil {
+		log.Infof("read memory controller status failed: %v", err)
+		return false
+	}
+	task.Result.PeakMemory = status.PeakMemoryKB
+
+	isMLE := status.Exceeded()
 	if isMLE {
-		log.Infof("MLE: Memory Limit: %d. Peak %d, Rusage %d.", task.memoryLimit, task.Result.PeakMemory, task.Result.RusageMemory)
+		log.Infof(
+			"MLE: Memory limit: %d. Peak %d, OOM %d, OOMKill %d, Rusage %d.",
+			task.memoryLimit,
+			task.Result.PeakMemory,
+			status.OOMCount,
+			status.OOMKillCount,
+			task.Result.RusageMemory,
+		)
 	}
 
 	return isMLE
@@ -327,21 +339,10 @@ func (task *RunningTask) refreshTimeCost() {
 }
 
 func (task *RunningTask) refreshMemory() {
-	if memory, ok := task.refreshPeakMemoryFromProc(); ok {
-		log.Debugf("peak memory across tracees is: %d", memory)
-		if memory > task.Result.PeakMemory {
-			task.Result.PeakMemory = memory
-		}
-	}
-
 	memory := task.process.Memory()
 	log.Debugf("adjusted rusage memory is: %d", memory)
 	if memory > task.Result.RusageMemory {
 		task.Result.RusageMemory = memory
-	}
-	if memory > task.Result.PeakMemory {
-		log.Debugf("peak memory fallback from adjusted rusage is: %d", memory)
-		task.Result.PeakMemory = memory
 	}
 }
 
@@ -391,4 +392,35 @@ func (task *RunningTask) refreshPeakMemoryFromProc() (int64, bool) {
 func (task *RunningTask) parseRunningInfo() {
 	task.refreshTimeCost()
 	task.refreshMemory()
+}
+
+func (task *RunningTask) finalizeTraceResult() error {
+	if err := task.refreshFinalMemoryResult(); err != nil {
+		return fmt.Errorf("refresh final memory result: %w", err)
+	}
+	task.check()
+	return nil
+}
+
+func (task *RunningTask) refreshFinalMemoryResult() error {
+	if task.memoryCtrl == nil {
+		return nil
+	}
+
+	status, err := task.memoryCtrl.Status()
+	if err != nil {
+		return err
+	}
+	task.Result.PeakMemory = status.PeakMemoryKB
+	return nil
+}
+
+func (task *RunningTask) cleanupRuntimeResources() {
+	if task.memoryCtrl == nil {
+		return
+	}
+	if err := task.memoryCtrl.Cleanup(); err != nil {
+		log.Warnf("cleanup task memory controller failed: %v", err)
+	}
+	task.memoryCtrl = nil
 }

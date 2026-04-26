@@ -44,6 +44,5 @@
     "sysinfo",
     "unlink"
   ],
-  "Command": "/usr/bin/java -XX:ReservedCodeCacheSize=32m -XX:CompressedClassSpaceSize=32m -XX:MaxMetaspaceSize=64m -Xmx256m -Xss256k -XX:CICompilerCount=2 -XX:ActiveProcessorCount=2 Main",
-  "MemoryReserve": 1024
+  "Command": "/usr/bin/java -XX:ReservedCodeCacheSize=32m -XX:CompressedClassSpaceSize=32m -XX:MaxMetaspaceSize=64m -Xmx256m -Xss256k -XX:CICompilerCount=2 -XX:ActiveProcessorCount=2 Main"
 }

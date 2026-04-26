@@ -6,6 +6,23 @@ import (
 	"go.uber.org/zap"
 )
 
+type fakeMemoryController struct {
+	status memoryStatus
+	err    error
+}
+
+func (controller fakeMemoryController) Status() (memoryStatus, error) {
+	return controller.status, controller.err
+}
+
+func (controller fakeMemoryController) MovePID(pid int) error {
+	return nil
+}
+
+func (controller fakeMemoryController) Cleanup() error {
+	return nil
+}
+
 func Test_parseSize(t *testing.T) {
 	ret, _ := parseSize("   145164 kB")
 	if ret != 145164 {
@@ -84,7 +101,7 @@ func Test_parseStatusFieldRequiresColon(t *testing.T) {
 	}
 }
 
-func TestOutOfMemoryUsesPeakMemoryOnly(t *testing.T) {
+func TestOutOfMemoryFallsBackToPeakMemoryWithoutController(t *testing.T) {
 	log = zap.NewNop().Sugar()
 	defer func() {
 		log = nil
@@ -105,5 +122,44 @@ func TestOutOfMemoryUsesPeakMemoryOnly(t *testing.T) {
 	task.Result.PeakMemory = 5000
 	if !task.outOfMemory() {
 		t.Fatal("outOfMemory() = false, want true when PeakMemory exceeds limit")
+	}
+}
+
+func TestOutOfMemoryUsesMemoryControllerEvents(t *testing.T) {
+	log = zap.NewNop().Sugar()
+	defer func() {
+		log = nil
+	}()
+
+	task := &RunningTask{
+		memoryLimit: 4096,
+		memoryCtrl: fakeMemoryController{
+			status: memoryStatus{
+				PeakMemoryKB: 2048,
+				OOMCount:     0,
+				OOMKillCount: 0,
+			},
+		},
+		Result: &Result{
+			PeakMemory:   488,
+			RusageMemory: 7144,
+		},
+	}
+
+	if task.outOfMemory() {
+		t.Fatal("outOfMemory() = true, want false when memory controller has no OOM events")
+	}
+	if task.Result.PeakMemory != 2048 {
+		t.Fatalf("PeakMemory = %d, want 2048 from memory controller", task.Result.PeakMemory)
+	}
+
+	task.memoryCtrl = fakeMemoryController{
+		status: memoryStatus{
+			PeakMemoryKB: 3072,
+			OOMCount:     1,
+		},
+	}
+	if !task.outOfMemory() {
+		t.Fatal("outOfMemory() = false, want true when memory controller reports OOM")
 	}
 }

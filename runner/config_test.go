@@ -85,6 +85,27 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 	}
 }
 
+func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+
+	runWithTempCaseJSON(t, `{"MemoryReserve":32}`, func() {
+		SetLogger(nil)
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		warnings := cfg.ValidationWarnings()
+		if len(warnings) != 1 {
+			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
+		}
+		if warnings[0] != memoryReserveDeprecatedWarning {
+			t.Fatalf("ValidationWarnings() = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
+		}
+	})
+}
+
 func TestParseCommandFallbackUsesShlex(t *testing.T) {
 	tc := &TaskConfig{Command: `  /usr/bin/java   "Main Class"  `}
 	if got := tc.GetCommand(); got != "/usr/bin/java" {

@@ -59,7 +59,7 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_NPROC, &syscall.Rlimit{Max: 32, Cur: 32}); err != nil {
+	if err := syscall.Setrlimit(unix.RLIMIT_NPROC, &syscall.Rlimit{Max: 32, Cur: 32}); err != nil {
 		return err
 	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Max: 64, Cur: 64}); err != nil {

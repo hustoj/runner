@@ -381,7 +381,7 @@ func runChildProcess(spec childProcessSpec, pipeReadFD, pipeWriteFD int) {
 	if errno := setResourceLimit(syscall.RLIMIT_AS, &spec.hardMemoryLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitAddressSpace, errno)
 	}
-	if errno := setResourceLimit(syscall.RLIMIT_NPROC, &spec.nProcLimit); errno != 0 {
+	if errno := setResourceLimit(unix.RLIMIT_NPROC, &spec.nProcLimit); errno != 0 {
 		reportChildStartupFailure(pipeWriteFD, childStageLimitNProc, errno)
 	}
 	if errno := setResourceLimit(syscall.RLIMIT_NOFILE, &spec.noFileLimit); errno != 0 {

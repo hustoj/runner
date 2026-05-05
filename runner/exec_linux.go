@@ -386,9 +386,15 @@ func releaseChildCgroupGate(fd int) error {
 }
 
 func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteFD, gatePipeReadFD, gatePipeWriteFD int) {
+	// After raw fork, this path must stay limited to fixed control flow over
+	// precomputed data plus raw syscalls. Do not add logging, formatting,
+	// os package calls, panics, allocation-heavy helpers, or runtime-dependent
+	// syscall wrappers here.
 	rawClose(startupPipeReadFD)
 	rawClose(gatePipeWriteFD)
 
+	// The parent moves this pid into the task cgroup before releasing the gate,
+	// so process/thread limits cover the program before it reaches execve.
 	if errno := awaitParentCgroupJoin(gatePipeReadFD); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStageAwaitCgroupJoin, errno)
 	}
@@ -528,8 +534,14 @@ func rawSetpgid(pid int, pgid int) syscall.Errno {
 
 func reportChildStartupFailure(pipeWriteFD int, stage childStartupStage, errno syscall.Errno) {
 	var raw [8]byte
-	binary.LittleEndian.PutUint32(raw[:4], uint32(stage))
-	binary.LittleEndian.PutUint32(raw[4:], uint32(errno))
+	raw[0] = byte(stage)
+	raw[1] = byte(stage >> 8)
+	raw[2] = byte(stage >> 16)
+	raw[3] = byte(stage >> 24)
+	raw[4] = byte(errno)
+	raw[5] = byte(errno >> 8)
+	raw[6] = byte(errno >> 16)
+	raw[7] = byte(errno >> 24)
 
 	_, _, _ = syscall.RawSyscall(
 		syscall.SYS_WRITE,

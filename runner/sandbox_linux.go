@@ -180,7 +180,7 @@ func applySandboxNoNewPrivs(spec childSandboxSpec) childStartupFailure {
 }
 
 func applySandboxCredentials(spec childSandboxSpec) childStartupFailure {
-	if err := validateSandboxCredentialConfig(spec.uid, spec.gid); err != nil {
+	if (spec.uid < 0 && spec.gid >= 0) || (spec.uid >= 0 && spec.gid < 0) {
 		return childStartupFailure{stage: childStageSandboxInvalidCredentials, errno: syscall.EINVAL}
 	}
 	if spec.uid < 0 && spec.gid < 0 {

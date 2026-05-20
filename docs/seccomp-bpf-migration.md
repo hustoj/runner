@@ -10,9 +10,9 @@
 
 当前 runner 的 syscall 控制面有三个关键特点：
 
-1. 白名单来自 [runner/config.go](runner/config.go) 的 `AllowedCalls` 和 `AdditionCalls`。
-2. 一次性 syscall 来自 [runner/config.go](runner/config.go) 的 `OneTimeCalls`，默认包含 `execve`。
-3. 运行时的最终判定发生在 [runner/tracer_linux.go](runner/tracer_linux.go) 的 ptrace loop 中。
+1. 白名单来自 [runner/config.go](../runner/config.go) 的 `AllowedCalls` 和 `AdditionCalls`。
+2. 一次性 syscall 来自 [runner/config.go](../runner/config.go) 的 `OneTimeCalls`，默认包含 `execve`。
+3. 运行时的最终判定发生在 [runner/tracer_linux.go](../runner/tracer_linux.go) 的 ptrace loop 中。
 
 这个模型的主要问题是：
 
@@ -26,10 +26,13 @@
 
 当前 runner 在子进程里完成：
 
-1. rlimit
-2. IO 重定向
-3. sandbox 初始化
-4. `execve` 进入用户程序
+1. 等待父进程将 child 加入 task cgroup（cgroup gate）
+2. rlimit（cpu / output / stack / nofile / core）
+3. IO 重定向
+4. setpgid
+5. sandbox 初始化（namespace → rootfs → no_new_privs → 凭证切换）
+6. `ptrace(TRACEME)`
+7. `execve` 进入用户程序
 
 如果在 `execve` 之前安装 seccomp 过滤器，那么过滤器会穿过 `execve` 继承到用户程序。这意味着：
 
@@ -120,15 +123,17 @@
 
 如果引入 seccomp，推荐子进程顺序调整为：
 
-1. `limitResource()`
-2. `redirectIO()`
-3. namespace 阶段
-4. rootfs 阶段
-5. no_new_privs 阶段
-6. 凭证切换阶段（`setgroups` → `setgid` → `setuid`）
-7. `installSeccomp()`
-8. `ptraceTraceme()` 或等价的迁移期观测逻辑
-9. `execve()`
+1. `awaitCgroupGate()`（等待父进程完成 cgroup 加入）
+2. `setrlimits()`（cpu / output / stack / nofile / core）
+3. `redirectIO()`
+4. `setpgid()`
+5. namespace 阶段
+6. rootfs 阶段
+7. no_new_privs 阶段
+8. 凭证切换阶段（`setgroups` → `setgid` → `setuid`）
+9. `installSeccomp()`
+10. `ptraceTraceme()` 或等价的迁移期观测逻辑
+11. `execve()`
 
 这里把 `installSeccomp()` 放在凭证切换之后，是为了避免过滤器误伤前置的特权 syscall。
 

@@ -29,11 +29,11 @@
 
 ## 代码落点
 
-- [runner/exec.go](runner/exec.go)
-- [runner/tracer.go](runner/tracer.go)
-- [runner/tracer_linux.go](runner/tracer_linux.go)
-- [runner/process_linux.go](runner/process_linux.go)
-- [runner/sec.go](runner/sec.go)
+- [runner/exec.go](../runner/exec.go)
+- [runner/tracer.go](../runner/tracer.go)
+- [runner/tracer_linux.go](../runner/tracer_linux.go)
+- [runner/process_linux.go](../runner/process_linux.go)
+- [runner/sec.go](../runner/sec.go)
 
 ## 当前实现边界
 

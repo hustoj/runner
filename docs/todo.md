@@ -34,10 +34,9 @@
 
 ## Compiler 默认日志路径（原待验证项 B）
 
-**背景**：`cmd/compiler/cfg.go` 默认日志路径为 `/var/log/runner/compiler.log`。
+**背景**：`cmd/compiler/cfg.go` 默认日志路径曾为 `/var/log/runner/compiler.log`。
 
-待处理：
+已处理：
 
-- [ ] 确认生产部署是否依赖该默认路径
-- [ ] 如依赖：在 Docker 镜像或部署文档中确保目录存在并可写
-- [ ] 如不依赖：考虑改为 `/dev/stderr` 与 runner 保持一致，或在 README 中说明
+- [x] 默认值已改为空字符串 `""`，与 runner 保持一致
+- [x] 不再硬编码到可能不存在的系统目录

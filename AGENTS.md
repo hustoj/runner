@@ -7,7 +7,9 @@
 - `make`：构建 `bin/runner`
 - `make compiler`：构建 `bin/compile`
 - `make prepare`：构建 `bin/test`
-- `go test ./...`：运行 Go 单元测试
+- `go test ./...`（或 `make test-unit`）：运行 Go 单元测试
+- `make test-sandbox-behavior`：运行非 root 沙箱行为测试
+- `sudo -E make test-sandbox-behavior-root`：运行需要 root 的沙箱行为测试
 - `make testall`：执行 `tests/` 下的集成评测用例
 - `make build-docker-runner` / `make build-docker-compiler`：构建 Docker 镜像
 

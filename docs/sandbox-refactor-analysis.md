@@ -34,10 +34,15 @@ fork() → limitResource() → redirectIO() → ptraceTraceme() → exec()
          ❌ 没有任何降权/隔离
 
 After:
-prepareChildSandboxSpec()
+prepareChildProcessSpec()          // 父进程预计算所有参数
 fork()
-child: limitResource() → redirectIO() → applySandboxInChild() → ptraceTraceme() → execve()
-                                    ✅ 固定 child sandbox 路径
+child: awaitCgroupGate()           // 等待父进程把 child 加入 task cgroup
+     → setrlimits(cpu/output/stack/nofile/core)
+     → dupIO(stdin/stdout/stderr)
+     → setpgid
+     → applySandboxInChild()       // ✅ 固定 child sandbox 路径
+     → ptraceTraceme()
+     → execve()
 ```
 
 ### 实现要点
@@ -223,54 +228,38 @@ UseNetNS: false
 
 ## 未来演进方向
 
-### 短期（1 周内）
+### 已完成
 
-1. **🔥 P0：清理环境变量和 FD**
-   ```go
-   // 只传必要环境变量
-   env := []string{"PATH=/usr/bin:/bin"}
+1. **✅ 清理环境变量和 FD**
+   - `BuildMinimalEnv()` 只传递 `HOME`、`LANG`、`LC_ALL`、`PATH`、`TMPDIR`、`TZ`
+   - 所有 child IO 文件和 pipe 使用 `O_CLOEXEC`
+   - child 设置 `RLIMIT_NOFILE = 16` 限制可继承的 FD 数量
 
-   // 关闭继承的 FD
-   for fd := 3; fd < 256; fd++ {
-       syscall.Close(fd)
-   }
-   ```
+2. **✅ 添加沙箱行为集成测试**
+   - `sandbox_behavior_linux_test.go` 覆盖 `no_new_privs`、凭据切换、chroot+workdir、mount namespace
+   - `make test-sandbox-behavior` / `sudo -E make test-sandbox-behavior-root` 入口
 
-2. **✅ P1：添加集成测试**
-   - 在 Docker 容器中测试实际沙箱行为
-   - 验证降权、namespace、no_new_privs 效果
-   - 测试常见的沙箱逃逸场景
+3. **✅ 引入 cgroup v2**
+   - Memory：`memory.max` / `memory.events` / `memory.peak`
+   - MaxProcs：`pids.max`
+   - 详见 [`runner/cgroup-v2-memory.md`](runner/cgroup-v2-memory.md)
 
-### 中期（1 个月内）
+### 待推进
 
-3. **⬆️ P2：引入 seccomp-bpf**
-   ```go
-   func runChildProcess(spec childProcessSpec, ...) {
-       ...
-       if failure := applySandboxInChild(spec.sandbox); failure.failed() {
-           reportChildStartupFailure(pipeWriteFD, failure.stage, failure.errno)
-       }
-       installSeccomp(spec.sandbox) // 新增：内核态 syscall 过滤
-       ...
-   }
-   ```
+4. **⬆️ 引入 seccomp-bpf**
+   - 参见 [`seccomp-bpf-migration.md`](seccomp-bpf-migration.md)
+   - 建议先在 C/C++ 路径上实现 hybrid 模式
 
-4. **🔧 P2：补充 capability drop**
+5. **🔧 补充 capability drop**
    ```go
    // 在 dropPrivileges 前清空所有 capability
    syscall.Prctl(PR_CAPBSET_DROP, ...)
    ```
 
-### 长期（3-6 个月）
-
-5. **🏗️ P3：重构到 exec.Cmd**
+6. **🏗️ 重构到 exec.Cmd**
    - 彻底解决 Go raw fork 问题
    - 使用 `SysProcAttr` 设置所有沙箱参数
    - 代码更符合 Go 习惯
-
-6. **📊 P3：引入 cgroup v2**
-   - 替代 rlimit 做资源限制
-   - 支持更精确的内存/CPU/IO 控制
 关键技术细节
 
 ### 为什么 setgroups → setgid → setuid 的顺序不能变？

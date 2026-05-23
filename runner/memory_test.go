@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"testing"
 
 	"go.uber.org/zap"
@@ -161,5 +162,44 @@ func TestOutOfMemoryUsesMemoryControllerEvents(t *testing.T) {
 	}
 	if !task.outOfMemory() {
 		t.Fatal("outOfMemory() = false, want true when task controller reports OOM")
+	}
+}
+
+func TestOutOfMemoryFailsClosedWhenTaskControllerStatusFails(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := &RunningTask{
+		memoryLimit: 4096,
+		taskCtrl: fakeTaskController{
+			err: errors.New("read memory status"),
+		},
+		Result: &Result{},
+	}
+	task.Result.Init()
+
+	if !task.outOfMemory() {
+		t.Fatal("outOfMemory() = false, want true when task controller status cannot be trusted")
+	}
+}
+
+func TestFinalizeTraceResultFailsClosedWhenFinalMemoryStatusFails(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := &RunningTask{
+		memoryLimit: 4096,
+		taskCtrl: fakeTaskController{
+			err: errors.New("read final memory status"),
+		},
+		Result: &Result{},
+	}
+	task.Result.Init()
+
+	if err := task.finalizeTraceResult(); err != nil {
+		t.Fatalf("finalizeTraceResult() error = %v", err)
+	}
+	if task.Result.RetCode != MEMORY_LIMIT {
+		t.Fatalf("RetCode = %d, want MEMORY_LIMIT", task.Result.RetCode)
 	}
 }

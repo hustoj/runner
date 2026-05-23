@@ -327,7 +327,7 @@ func (task *RunningTask) outOfMemory() bool {
 	status, err := task.taskCtrl.MemoryStatus()
 	if err != nil {
 		log.Infof("read task memory status failed: %v", err)
-		return false
+		return true
 	}
 	task.Result.PeakMemory = status.PeakMemoryKB
 
@@ -422,7 +422,8 @@ func (task *RunningTask) refreshFinalMemoryResult() error {
 
 	status, err := task.taskCtrl.MemoryStatus()
 	if err != nil {
-		return err
+		log.Infof("read final task memory status failed: %v", err)
+		return nil
 	}
 	task.Result.PeakMemory = status.PeakMemoryKB
 	return nil

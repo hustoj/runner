@@ -133,6 +133,11 @@ func ptraceTraceme() syscall.Errno {
 	return errno
 }
 
+var (
+	writeChildCgroupGate = syscall.Write
+	wait4ChildStartup    = syscall.Wait4
+)
+
 func setAlarm(seconds uint64) syscall.Errno {
 	timer := unix.Itimerval{
 		Value: unix.Timeval{Sec: int64(seconds)},
@@ -374,15 +379,32 @@ func readChildStartupFailure(fd int) (childStartupFailure, error) {
 func waitChildStartupFailure(pid int) {
 	var status syscall.WaitStatus
 	var rusage syscall.Rusage
-	_, _ = syscall.Wait4(pid, &status, 0, &rusage)
+	for {
+		_, err := wait4ChildStartup(pid, &status, 0, &rusage)
+		if err == syscall.EINTR {
+			continue
+		}
+		return
+	}
 }
 
 func releaseChildCgroupGate(fd int) error {
 	defer func() {
 		_ = syscall.Close(fd)
 	}()
-	_, err := syscall.Write(fd, []byte{1})
-	return err
+	for {
+		n, err := writeChildCgroupGate(fd, []byte{1})
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return io.ErrShortWrite
+		}
+		return nil
+	}
 }
 
 func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteFD, gatePipeReadFD, gatePipeWriteFD int) {

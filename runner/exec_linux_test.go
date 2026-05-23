@@ -5,6 +5,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -100,6 +101,62 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 			wantCoreLimit,
 			wantCoreLimit,
 		)
+	}
+}
+
+func TestReleaseChildCgroupGateRetriesEINTR(t *testing.T) {
+	original := writeChildCgroupGate
+	t.Cleanup(func() {
+		writeChildCgroupGate = original
+	})
+
+	calls := 0
+	writeChildCgroupGate = func(fd int, data []byte) (int, error) {
+		calls++
+		if calls == 1 {
+			return 0, syscall.EINTR
+		}
+		if fd != -1 {
+			t.Fatalf("write fd = %d, want -1 test fd", fd)
+		}
+		if len(data) != 1 || data[0] != 1 {
+			t.Fatalf("gate data = %v, want [1]", data)
+		}
+		return 1, nil
+	}
+
+	if err := releaseChildCgroupGate(-1); err != nil {
+		t.Fatalf("releaseChildCgroupGate() error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("write calls = %d, want 2", calls)
+	}
+}
+
+func TestWaitChildStartupFailureRetriesEINTR(t *testing.T) {
+	original := wait4ChildStartup
+	t.Cleanup(func() {
+		wait4ChildStartup = original
+	})
+
+	calls := 0
+	wait4ChildStartup = func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		calls++
+		if pid != 1234 {
+			t.Fatalf("wait pid = %d, want 1234", pid)
+		}
+		if options != 0 {
+			t.Fatalf("wait options = %d, want 0", options)
+		}
+		if calls == 1 {
+			return 0, syscall.EINTR
+		}
+		return pid, nil
+	}
+
+	waitChildStartupFailure(1234)
+	if calls != 2 {
+		t.Fatalf("wait calls = %d, want 2", calls)
 	}
 }
 

@@ -359,7 +359,9 @@ func (task *RunningTask) refreshMemory() {
 	}
 }
 
-func (task *RunningTask) refreshPeakMemoryFromProc() (int64, bool) {
+// refreshPeakMemoryFromProc 采样 /proc/<pid>/status 的 VmHWM 按线程组求和。
+// 当前内存统计已走 cgroup v2 路径(见 refreshFinalMemoryResult),此方法保留作为 fallback/采样入口。
+func (task *RunningTask) refreshPeakMemoryFromProc() (int64, bool) { //nolint:unused // 预留:非 cgroup 场景下的采样回退路径
 	groupPeaks := make(map[int]int64)
 	sampled := false
 

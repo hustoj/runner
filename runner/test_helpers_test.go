@@ -1,3 +1,5 @@
+//go:build linux
+
 package runner
 
 func containsString(values []string, want string) bool {

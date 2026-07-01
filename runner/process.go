@@ -211,8 +211,10 @@ func (process *Process) GetTimeCost() int64 {
 	// specific waited child/task rather than reporting a shared wall-clock value.
 	var total int64
 	for _, ru := range process.rusageByPid {
-		uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec)
-		total += uSec + (int64(ru.Utime.Sec)+int64(ru.Stime.Sec))*1e6
+		// Timeval.Usec is int32 on darwin and int64 on linux; the int64()
+		// conversion is required for darwin and reported as redundant on linux.
+		uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec) //nolint:unconvert // cross-platform: Usec type differs
+		total += uSec + (ru.Utime.Sec+ru.Stime.Sec)*1e6
 	}
 	return total
 }

@@ -1,18 +1,61 @@
+# pre-commit 配置
+#
+# 安装:
+#   make pre-commit-install
+#
+# 手动运行:
+#   pre-commit run --all-files
+#
+# default_install_hook_types 让 `pre-commit install` 一次安装 pre-commit
+# 与 commit-msg 两类钩子,无需手动追加 --hook-type commit-msg。
+
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
-    hooks:
-      - id: go-fmt
-      - id: go-mod-tidy
+  # Go: golangci-lint (官方维护,自带 gofmt/goimports/govet 等)
+  # 配置见 .golangci.yml
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.11.3
+    rev: v2.12.2
     hooks:
       - id: golangci-lint
+        args: [--config=.golangci.yml, --timeout=5m]
+
+  # Go: go mod tidy (local hook,无需外部依赖)
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy
+        language: system
+        pass_filenames: false
+        files: \.go$|^go\.(mod|sum)$
+
+  # 通用文本/文件卫生
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-json
+      - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+      - id: check-shebang-scripts-are-executable
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+
+  # 安全:密钥/凭证泄露检测
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.9.0
+    hooks:
+      - id: gitleaks
+
+  # Conventional Commits:commit-msg 校验
+  # 匹配项目现有的 feat/fix/test/refactor/chore/docs 风格
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

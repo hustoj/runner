@@ -1,0 +1,49 @@
+# golangci-lint v2 配置
+# 文档: https://golangci-lint.run/usage/configuration/
+#
+# Darwin 平台文件 (*_darwin.go) 为跨平台开发占位,AGENTS.md 已说明,
+# 其中的 unused 警告通过 exclusions.rules 显式排除,不视为问题。
+
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25"
+
+linters:
+  default: none
+  enable:
+    - errcheck      # 检查未处理的错误返回值
+    - govet         # go vet 检查
+    - misspell      # 拼写错误
+    - staticcheck   # 综合静态分析(已包含 gosimple/sa* 规则)
+    - unconvert     # 多余的类型转换
+    - unused        # 未使用的代码
+  settings:
+    misspell:
+      locale: US
+  exclusions:
+    paths:
+      - "tests/.*"           # 集成用例目录,内部含示例代码,不参与 lint
+      - "vendor/.*"
+    rules:
+      # Darwin 占位文件中的 unused 函数是平台实现对称性所需的存根,
+      # 真正的实现在 *_linux.go 中。见 AGENTS.md "Darwin 文件主要用于跨平台开发占位"。
+      - linters:
+          - unused
+        path: ".*_darwin\\.go$"
+        text: "is unused"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/hustoj/runner
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  fix: false

@@ -1,7 +1,9 @@
 # Repository Guidelines
 
 ## 项目结构与模块组织
-`cmd/runner`、`cmd/compiler`、`cmd/test` 是三个可执行入口。`runner/` 是核心库，按能力拆分为 `exec*`、`process*`、`memory*`、`tracer*`、`sandbox*`，并使用 `*_linux.go`、`*_darwin.go` 区分平台实现。`sec/` 维护系统调用表与对应测试。`tests/` 存放集成用例，每个目录通常包含 `case.json`、示例程序和 `makefile`。`docker/` 保存镜像构建上下文，`docs/` 记录沙箱、ptrace 和 seccomp 相关设计说明。
+`cmd/runner`、`cmd/compiler`、`cmd/test` 是三个可执行入口，分别对应评测沙箱、受限编译器和集成用例校验器。`runner/` 是核心库，按能力拆分为 `exec*`、`process*`、`memory*`、`tracer*`、`sandbox*`，并使用 `*_linux.go`、`*_darwin.go` 区分平台实现。`sec/` 维护系统调用表与对应测试。`tests/` 存放集成用例，每个目录通常包含 `case.json`、示例程序和 `makefile`。`docker/` 保存镜像构建上下文，`docs/` 记录沙箱、ptrace 和 seccomp 相关设计说明。
+
+核心运行链路在 `runner/exec.go`：父进程 fork 子进程，子进程设置 rlimit、I/O、sandbox、ptrace 后 exec 目标程序；父进程通过 ptrace 检查 syscall 白名单并刷新资源统计。排查执行问题时优先关注 `runner/exec.go`、`runner/process.go`、`runner/tracer*.go`、`runner/sec.go`、`runner/result.go`、`runner/config.go`。
 
 ## 构建、测试与开发命令
 - `make`：构建 `bin/runner`
@@ -26,4 +28,4 @@
 最近提交以类 Conventional Commits 风格为主，如 `feat: ...`、`fix: ...`、`test(runner): ...`、`refactor: ...`、`chore: ...`。摘要应简短，并在必要时带模块范围。`.pre-commit-config.yaml` 通过 `default_install_hook_types` 同时注册 `pre-commit` 与 `commit-msg` 钩子，`make pre-commit-install` 一次安装即可；后者由 `conventional-pre-commit` 强制校验提交信息格式。PR 说明应包含影响的平台、执行过的命令、是否改变沙箱/安全行为；若修改 `case.json`、系统调用表或 Docker 构建流程，需在描述中明确指出。仓库当前没有现成的 PR 模板，说明请写完整。
 
 ## 安全与配置提示
-该仓库以 Linux 评测沙箱为核心，Darwin 文件主要用于跨平台开发占位。不要轻易放宽允许的系统调用；相关变更应同步补测试并更新 `docs/`。运行时默认从工作目录读取 `case.json`，示例配置应保持最小、可复现。
+该仓库以 Linux 评测沙箱为核心，运行依赖 ptrace、`/proc`、Linux syscall 与 cgroup；Darwin 文件主要用于跨平台构建和部分单元测试占位。涉及 ptrace、沙箱行为、资源限制或集成用例的变更，最终必须在 Linux 环境验证。不要轻易放宽允许的系统调用；相关变更应同步补测试并更新 `docs/`。运行时默认从工作目录读取 `case.json`，示例配置应保持最小、可复现。

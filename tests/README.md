@@ -15,7 +15,7 @@
 - 内存限制：`mle/`、`mle2/`、`mle21/`、`mle3/`
 - 时间限制：`tle/`、`tle2/`、`java-tle/`
 - 运行异常：`segmentfault/`、`sigtrap/`、`zero/`
-- 系统调用与环境限制：`socket/`、`stack/`
+- 系统调用与环境限制：`clone-syscall-phase/`、`socket/`、`stack/`
 - 输出限制：`ole/`
 - Java 内存场景：`java-mle/`
 

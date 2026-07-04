@@ -37,10 +37,6 @@ func TestTracerDetectTracksTraceeStatePerPid(t *testing.T) {
 	assert.False(t, tracer.ConsumeAttachStop(100, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
 	assert.False(t, tracer.ConsumeAttachStop(102, syscall.WaitStatus((int(syscall.SIGSTOP)<<8)|0x7f)))
 
-	tracer.setInSyscall(100, true)
-	tracer.FinishPtraceEvent(100)
-	assert.False(t, tracer.inSyscall(100))
-
 	tracer.RemoveTracee(101)
 	assert.False(t, tracer.HasTracee(101))
 }

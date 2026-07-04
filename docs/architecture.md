@@ -174,7 +174,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 - [sec/syscalls_test.go](../sec/syscalls_test.go):交叉校验表与内核常量、新内核 syscall 覆盖、架构差异。
 - [sandbox_behavior_linux_test.go](../runner/sandbox_behavior_linux_test.go):行为级集成测试,通过 `runProcess()` 启动真实子进程读 `/proc/<pid>/status` 断言 NoNewPrivs、UID/GID 切换、mount namespace、chroot(部分用例需 root)。
 
-### 9.2 集成测试(`tests/`,19 个 case)
+### 9.2 集成测试(`tests/`,20 个 case)
 
 每个 case = `case.json` + 源码(`.c`/`.java`)+ `makefile`(`gcc -static → ../../bin/test → clean`)。`make testall`([Makefile](../Makefile))依次进入每个目录执行。分类:
 
@@ -183,7 +183,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 | 正常 | `general` |
 | 资源限制 | `tle` `tle2` `mle` `mle2` `mle21` `mle3` `ole` `prlimit-ole` `stack` |
 | 运行时异常 | `segmentfault` `sigtrap` `zero` |
-| 安全/多进程 | `fork` `socket` `thread` |
+| 安全/多进程 | `clone-syscall-phase` `fork` `socket` `thread` |
 | Java | `java` `java-tle` `java-mle` |
 
 `make testall` 需要 C/C++ 工具链(静态链接)、GNU Make,可选 Java(`tests/java*`)。完整前提与平台支持矩阵见 [README.md](../README.md)。

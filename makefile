@@ -41,6 +41,7 @@ pre-commit-run:
 
 testall: prepare
 	cd tests/general;make
+	cd tests/clone-syscall-phase;make
 	cd tests/fork;make
 	cd tests/mle;make
 	cd tests/mle2;make

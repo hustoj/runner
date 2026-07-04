@@ -72,12 +72,6 @@ func (tracer *TracerDetect) ConsumeAttachStop(pid int, status syscall.WaitStatus
 	return true
 }
 
-func (tracer *TracerDetect) FinishPtraceEvent(pid int) {
-	if state, ok := tracer.getTracee(pid); ok && state.inSyscall {
-		state.inSyscall = false
-	}
-}
-
 func (tracer *TracerDetect) consumeBootstrapCall(callID uint64) {
 	if tracer.callPolicy == nil {
 		return

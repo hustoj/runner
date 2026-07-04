@@ -1,0 +1,8 @@
+{
+  "Name": "Clone event should not reset syscall phase",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 16,
+  "Result": 10,
+  "AdditionCalls": ["clone"]
+}

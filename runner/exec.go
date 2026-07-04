@@ -143,7 +143,6 @@ func (task *RunningTask) trace() error {
 			continue
 		}
 		if process.IsPtraceEventStop() {
-			tracer.FinishPtraceEvent(process.CurrentPid)
 			if !task.handlePtraceEvent(process, &tracer) {
 				break
 			}

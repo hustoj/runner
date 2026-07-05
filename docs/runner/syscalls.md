@@ -4,6 +4,10 @@
 > (`AllowedCalls` / `OneTimeCalls`) and the platform-specific defaults in
 > `runner/defaults_linux_*.go`. Per-case overrides live in each `case.json`
 > under `AdditionCalls`. This document is a human-readable summary.
+> With `SyscallBackend: "hybrid"`, Linux turns the effective runtime allowlist
+> into seccomp-BPF `ALLOW` rules installed before the user program starts.
+> `OneTimeCalls` such as bootstrap `execve` use `SECCOMP_RET_TRACE`, so ptrace
+> remains the startup boundary instead of permanently allowing them.
 
 ## Default allowed syscalls (runtime-supported Linux platforms)
 

@@ -78,3 +78,78 @@ func TestCheckSyscallTreatsUnexpectedPtraceErrorsAsTracerError(t *testing.T) {
 
 	assert.Equal(t, syscallCheckTracerError, tracer.checkSyscall(100))
 }
+
+func TestCheckSeccompTraceRejectsConsumedExecveBeforeEnter(t *testing.T) {
+	oneTimeCalls := []string{"execve"}
+	allowedCalls := []string{}
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	policy, err := makeCallPolicy(&oneTimeCalls, &allowedCalls)
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_EXECVE))
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckViolation, tracer.checkSeccompTrace(100))
+}
+
+func TestCheckSeccompTracePrecheckSkipsNextEnterCheck(t *testing.T) {
+	oneTimeCalls := []string{"getpid"}
+	allowedCalls := []string{}
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	policy, err := makeCallPolicy(&oneTimeCalls, &allowedCalls)
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_GETPID))
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckOK, tracer.checkSeccompTrace(100))
+	assert.Equal(t, syscallCheckOK, tracer.checkSyscall(100))
+	assert.True(t, tracer.inSyscall(100))
+	assert.False(t, tracer.callPolicy.CheckID(uint64(syscall.SYS_GETPID)))
+}
+
+func TestCheckSeccompTraceAfterEnterDoesNotRecheckPolicy(t *testing.T) {
+	oneTimeCalls := []string{}
+	allowedCalls := []string{}
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+	tracer.setInSyscall(100, true)
+
+	policy, err := makeCallPolicy(&oneTimeCalls, &allowedCalls)
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_GETPID))
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckOK, tracer.checkSeccompTrace(100))
+	assert.True(t, tracer.inSyscall(100))
+}

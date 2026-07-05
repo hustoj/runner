@@ -114,15 +114,16 @@ setrlimit(CPU) → setitimer(alarm, CPU+5)
 
 ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-minimal-fix.md](ptrace-minimal-fix.md)。
 
-## 6. 安全机制:三段式沙箱(非 seccomp)
+## 6. 安全机制:hybrid syscall 过滤与三段式沙箱
 
-**仓库中没有任何 seccomp-BPF 的实际代码**,seccomp 仅作为未来迁移方向出现在 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。当前安全边界完全建立在三段之上:
+当前默认仍是 ptrace-only；当 `SyscallBackend` 配置为 `hybrid` 时，runner 会在 Linux 子进程完成沙箱和 `ptrace(TRACEME)` 后、`execve` 前安装 seccomp-BPF 过滤器。seccomp 负责把普通 runtime syscall 过滤下沉到内核态，ptrace 保留 bootstrap `execve` 一次性语义、多 tracee 生命周期和迁移期审计职责。迁移背景见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。
 
-### 6.1 ptrace 用户态白名单(主过滤层)
+### 6.1 syscall 白名单
 
 - [`TracerDetect`](../runner/tracer.go) 为每个 tracee 维护 enter/exit 相位;只在 **syscall-enter stop** 查白名单。
 - [`CallPolicy`](../runner/sec.go) 是两层白名单:`allowedCalls`(永久)+ `oneTimeCalls`(一次性,默认只有 `execve`,启动期被预先消费)。
-- ptrace 选项(`process_linux.go`):`PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL | TRACE{CLONE,FORK,VFORK}`。`TRACESYSGOOD` 让 syscall-stop 用 `SIGTRAP|0x80`,与真实 `SIGTRAP` 区分。
+- ptrace 选项(`process_linux.go`):默认是 `PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL | TRACE{CLONE,FORK,VFORK}`；hybrid 模式额外打开 `PTRACE_O_TRACESECCOMP`。`TRACESYSGOOD` 让 syscall-stop 用 `SIGTRAP|0x80`,与真实 `SIGTRAP` 区分。
+- hybrid 模式下,`AllowedCalls + AdditionCalls` 会生成 seccomp `ALLOW` 规则；`OneTimeCalls` 生成 `SECCOMP_RET_TRACE` 规则,由 ptrace 在启动边界审批。普通禁止 syscall 会在内核态执行前被杀死,不会再依赖 ptrace enter/exit 相位。
 
 ### 6.2 rlimit 内核兜底层
 
@@ -251,7 +252,7 @@ RUNTIME_ERROR=10, COMPILE_ERROR=11, COMPILE_OK=12, TEST_RUN=13
 
 以下均为既有文档已记录的事项,此处仅做导航:
 
-- **seccomp 迁移**(ptrace 用户态过滤的性能与复杂度):分阶段草案见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。主要难点是 `execve once` 语义与 seccomp allowlist 不兼容。
+- **seccomp 迁移**:当前已支持显式 `SyscallBackend: "hybrid"`，默认仍为 ptrace-only。后续纯 seccomp 方向见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。主要难点仍是 `execve once` 语义与 seccomp allowlist 不兼容。
 - **ptrace 多 tracee 剩余风险**(资源统计仍是近似模型):见 [ptrace-minimal-fix.md](ptrace-minimal-fix.md)。
 - **资源限制待验证项**(`MemoryReserve` 余量是否覆盖各语言初始化、短生命周期 MLE 能否被 `/proc` 采样捕获、Java 多线程下 thread group 聚合准确性、`RLIMIT_AS` 过紧致 mmap 失败):见 [todo.md](todo.md)。
 - **平台支持边界**(其它 Linux 架构可编译但启动失败,arm64 集成测试需在目标主机跑):见 [README.md](../README.md) 的 Platform Support 一节。
@@ -260,7 +261,7 @@ RUNTIME_ERROR=10, COMPILE_ERROR=11, COMPILE_OK=12, TEST_RUN=13
 
 - 想理解 ptrace 状态机的历史问题与多 tracee 演进 → [ptrace-minimal-fix.md](ptrace-minimal-fix.md)
 - 想理解 namespace / chroot / 降权顺序的设计 → [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)
-- 想看未来从 ptrace 迁移到 seccomp-bpf 的方向 → [seccomp-bpf-migration.md](seccomp-bpf-migration.md)
+- 想看 hybrid syscall 过滤和后续纯 seccomp 方向 → [seccomp-bpf-migration.md](seccomp-bpf-migration.md)
 - 想查运行期资源限制字段与判题口径 → [runner/resource-limits.md](runner/resource-limits.md)
 - 想查运行期 syscall 白名单实践与 Java 案例 → [runner/syscalls.md](runner/syscalls.md)
 - 想看待验证事项清单 → [todo.md](todo.md)

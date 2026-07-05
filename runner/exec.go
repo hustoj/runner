@@ -51,9 +51,7 @@ func (task *RunningTask) trace() error {
 	tracer := TracerDetect{}
 	tracer.RegisterTracee(task.process.Pid, false)
 
-	allowedCalls := make([]string, 0, len(task.setting.AllowedCalls)+len(task.setting.AdditionCalls))
-	allowedCalls = append(allowedCalls, task.setting.AllowedCalls...)
-	allowedCalls = append(allowedCalls, task.setting.AdditionCalls...)
+	allowedCalls := effectiveAllowedCalls(task.setting)
 	log.Debugf("allowed syscall is: %s", allowedCalls)
 	policy, err := makeCallPolicy(&task.setting.OneTimeCalls, &allowedCalls)
 	if err != nil {
@@ -87,7 +85,8 @@ func (task *RunningTask) trace() error {
 	}
 	process.SetThreadGroup(process.Pid, process.Pid)
 	process.SetRusageOffset(process.Pid, process.Rusage.Maxrss)
-	if err := process.SetPtraceOptions(); err != nil {
+	traceSeccomp := task.traceSeccompEvents()
+	if err := process.SetPtraceOptions(traceSeccomp); err != nil {
 		log.Infof("PtraceSetOptions: err %v", err)
 		task.Result.RetCode = RUNTIME_ERROR
 		process.Kill()
@@ -128,7 +127,7 @@ func (task *RunningTask) trace() error {
 			continue
 		}
 		if tracer.ConsumeAttachStop(process.CurrentPid, process.Status) {
-			if err := process.SetPtraceOptions(); err != nil {
+			if err := process.SetPtraceOptions(traceSeccomp); err != nil {
 				log.Infof("PtraceSetOptions(new child): err %v", err)
 				task.Result.RetCode = RUNTIME_ERROR
 				process.Kill()
@@ -206,6 +205,17 @@ func (task *RunningTask) trace() error {
 	return task.finalizeTraceResult()
 }
 
+func effectiveAllowedCalls(setting *TaskConfig) []string {
+	allowedCalls := make([]string, 0, len(setting.AllowedCalls)+len(setting.AdditionCalls))
+	allowedCalls = append(allowedCalls, setting.AllowedCalls...)
+	allowedCalls = append(allowedCalls, setting.AdditionCalls...)
+	return allowedCalls
+}
+
+func (task *RunningTask) traceSeccompEvents() bool {
+	return task.setting.effectiveSyscallBackend() == syscallBackendHybrid
+}
+
 func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetect) bool {
 	switch process.PtraceEvent() {
 	case ptraceEventClone, ptraceEventFork, ptraceEventVFork:
@@ -223,6 +233,24 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 		}
 		tracer.RegisterTracee(newPid, true)
 		log.Infof("registered traced child pid=%d from event=%d", newPid, process.PtraceEvent())
+	case ptraceEventSeccomp:
+		checkResult := tracer.checkSeccompTrace(process.CurrentPid)
+		if checkResult == syscallCheckViolation {
+			log.Debugf("------- check seccomp-traced syscall failed")
+			process.Kill()
+			task.Result.RetCode = RUNTIME_ERROR
+			return false
+		}
+		if checkResult == syscallCheckTraceeGone {
+			log.Debugf("skip seccomp trace inspection for pid=%d because tracee is already gone", process.CurrentPid)
+			return true
+		}
+		if checkResult == syscallCheckTracerError {
+			log.Warnf("ptrace register read failed for seccomp event pid=%d", process.CurrentPid)
+			process.Kill()
+			task.Result.RetCode = RUNTIME_ERROR
+			return false
+		}
 	default:
 		log.Warnf("unhandled ptrace event %d on pid=%d", process.PtraceEvent(), process.CurrentPid)
 	}

@@ -4,16 +4,19 @@ package runner
 
 import (
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const syscallStopSignal = syscall.Signal(syscall.SIGTRAP | 0x80)
 
 const ptraceOExitKill = 0x00100000
-const ptraceTraceEvents = syscall.PTRACE_O_TRACECLONE | syscall.PTRACE_O_TRACEFORK | syscall.PTRACE_O_TRACEVFORK
+const ptraceForkTraceEvents = syscall.PTRACE_O_TRACECLONE | syscall.PTRACE_O_TRACEFORK | syscall.PTRACE_O_TRACEVFORK
 const (
-	ptraceEventFork  = syscall.PTRACE_EVENT_FORK
-	ptraceEventVFork = syscall.PTRACE_EVENT_VFORK
-	ptraceEventClone = syscall.PTRACE_EVENT_CLONE
+	ptraceEventFork    = syscall.PTRACE_EVENT_FORK
+	ptraceEventVFork   = syscall.PTRACE_EVENT_VFORK
+	ptraceEventClone   = syscall.PTRACE_EVENT_CLONE
+	ptraceEventSeccomp = unix.PTRACE_EVENT_SECCOMP
 )
 
 func waitOptions() int {
@@ -34,6 +37,10 @@ func (process *Process) ContinueWithSignal(sig int) bool {
 		return false
 	}
 	return true
+}
+
+func ptraceCont(pid int, sig int) error {
+	return syscall.PtraceCont(pid, sig)
 }
 
 func (process *Process) IsInitialTraceStop() bool {
@@ -57,6 +64,14 @@ func (process *Process) GetEventPid() (int, error) {
 	return int(msg), err
 }
 
-func (process *Process) SetPtraceOptions() error {
-	return syscall.PtraceSetOptions(process.CurrentPid, syscall.PTRACE_O_TRACESYSGOOD|ptraceOExitKill|ptraceTraceEvents)
+func (process *Process) SetPtraceOptions(traceSeccomp bool) error {
+	return setPtraceOptions(process.CurrentPid, traceSeccomp)
+}
+
+func setPtraceOptions(pid int, traceSeccomp bool) error {
+	options := syscall.PTRACE_O_TRACESYSGOOD | ptraceOExitKill | ptraceForkTraceEvents
+	if traceSeccomp {
+		options |= unix.PTRACE_O_TRACESECCOMP
+	}
+	return syscall.PtraceSetOptions(pid, options)
 }

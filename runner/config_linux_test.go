@@ -55,3 +55,21 @@ func TestValidateAcceptsValidSyscallNames(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateAcceptsHybridSyscallBackend(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+
+	json := `{"SyscallBackend":"hybrid","NoNewPrivs":true,"OneTimeCalls":["execve"],"AllowedCalls":["read"],"AdditionCalls":["write"]}`
+	runWithTempCaseJSON(t, json, func() {
+		SetLogger(nil)
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if got := cfg.effectiveSyscallBackend(); got != syscallBackendHybrid {
+			t.Fatalf("effectiveSyscallBackend() = %q, want %q", got, syscallBackendHybrid)
+		}
+	})
+}

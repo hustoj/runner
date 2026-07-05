@@ -17,3 +17,7 @@ func validateSyscallNames(field string, names []string) error {
 	}
 	return nil
 }
+
+func validateSyscallBackendForPlatform(_ string) error {
+	return nil
+}

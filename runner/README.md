@@ -1,13 +1,13 @@
 # runner
 
-该目录是仓库核心库，负责运行 `case.json` 描述的任务，并在 Linux 上完成资源限制、沙箱隔离、ptrace syscall 检查、时间内存采集与结果归类。
+该目录是仓库核心库，负责运行 `case.json` 描述的任务，并在 Linux 上完成资源限制、沙箱隔离、syscall 检查、时间内存采集与结果归类。
 
 ## 主要职责
 
 - 解析并校验运行配置
 - 启动子进程并设置资源限制、工作目录、IO 重定向
 - 应用沙箱隔离能力，如 `chroot`、namespace、`no_new_privs`、降权
-- 使用 ptrace 跟踪 syscall，并结合 allowlist / one-time policy 做拦截
+- 使用 ptrace 跟踪 syscall，并结合 allowlist / one-time policy 做拦截；Linux 上可通过 `SyscallBackend: "hybrid"` 额外启用 seccomp-BPF 作为主过滤边界
 - 采集时间与内存数据，输出统一 `Result`
 
 ## 关键文件
@@ -19,6 +19,7 @@
 - `process*.go`：对子进程 `wait`、ptrace 选项、状态判断的封装。
 - `tracer*.go`：syscall 读取与判定逻辑，核心标识符是 `TracerDetect`。
 - `sec.go`：把 syscall 名称列表转换成可执行的 `CallPolicy`。
+- `seccomp_linux.go`：hybrid 模式下的 seccomp-BPF `ALLOW` / `TRACE` 规则生成与安装逻辑。
 - `sandbox_linux.go`：namespace、`chroot`、`no_new_privs`、降权顺序的统一入口。
 - `memory*.go`：内存采集逻辑。
 - `result.go`：评测状态码及 signal 到状态码的映射。
@@ -36,7 +37,7 @@
 
 - 想新增 `case.json` 配置项：先看 `config.go`
 - 想修改资源限制或 IO 文件：先看 `exec_linux.go`
-- 想调整 syscall 允许策略：先看 `sec.go`、`tracer_linux.go`，再看 [`../sec/`](../sec/)
+- 想调整 syscall 允许策略：先看 `sec.go`、`tracer_linux.go`、`seccomp_linux.go`，再看 [`../sec/`](../sec/)
 - 想调整沙箱执行顺序：先看 `sandbox_linux.go`
 - 想调整结果状态或信号映射：先看 `result.go`
 

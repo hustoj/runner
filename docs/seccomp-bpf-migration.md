@@ -1,10 +1,12 @@
 # seccomp-bpf 迁移草案
 
+> 当前代码已落地 Phase 1 的最小 hybrid 版本：默认仍是 `ptrace`，显式配置 `SyscallBackend: "hybrid"` 时会在 Linux child 中安装 seccomp-BPF 过滤器；普通 runtime allowlist 走 `ALLOW`，`OneTimeCalls` 走 `SECCOMP_RET_TRACE` 交给 ptrace 做启动边界判断。纯 seccomp 仍是后续方向。
+
 ## 目标
 
 把 syscall 过滤的安全边界从用户态 ptrace 下沉到内核态 seccomp-bpf，同时尽量复用当前 runner 的配置模型和测试资产。
 
-这份草案的目标不是直接替换全部运行逻辑，而是给出一条低风险迁移路径。
+这份草案的目标不是直接替换全部运行逻辑，而是给出一条低风险迁移路径；当前实现覆盖了第一阶段的工程接缝。
 
 ## 当前现状
 
@@ -52,10 +54,10 @@
 建议做法：
 
 1. 保留当前最小修复后的 ptrace 初始化流程。
-2. 在子进程完成 namespace、rootfs、no_new_privs、凭证切换之后安装 seccomp 过滤器。
+2. 在子进程完成 namespace、rootfs、no_new_privs、凭证切换之后安装 seccomp 过滤器。当前首版 hybrid 实现将安装点放在 `ptrace(TRACEME)` 之后、`execve` 之前，这样 runtime seccomp allowlist 不需要放行用户态 `ptrace`。
 3. seccomp 规则负责稳定的 runtime allowlist，例如 `read`、`write`、`mmap`、`brk`、`exit_group` 这类通用 syscall。
 4. ptrace 暂时只处理两类场景：
-   - bootstrap `execve` 的边界语义
+   - bootstrap `execve` 的边界语义：BPF 对 `OneTimeCalls` 返回 `SECCOMP_RET_TRACE`，parent 在 `PTRACE_EVENT_SECCOMP` 上确认这次启动期 `execve`
    - 迁移期的审计和对照验证
 
 这样做的好处是：
@@ -131,11 +133,13 @@
 6. rootfs 阶段
 7. no_new_privs 阶段
 8. 凭证切换阶段（`setgroups` → `setgid` → `setuid`）
-9. `installSeccomp()`
-10. `ptraceTraceme()` 或等价的迁移期观测逻辑
-11. `execve()`
+9. `ptraceTraceme()` 或等价的迁移期观测逻辑
+10. child 用 `SIGSTOP` 等待 parent 设置 `PTRACE_O_TRACESECCOMP`
+11. `installSeccomp()`
+12. `execve()`
 
 这里把 `installSeccomp()` 放在凭证切换之后，是为了避免过滤器误伤前置的特权 syscall。
+首版实现进一步把它放在 `ptraceTraceme()` 之后，是为了不把 `ptrace` 加进用户程序继承的 runtime allowlist；`execve once` 不进入永久 allowlist，而是通过 `SECCOMP_RET_TRACE` 交给 ptrace 审批。
 
 ## 测试计划
 

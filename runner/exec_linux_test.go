@@ -104,6 +104,65 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	}
 }
 
+func TestPrepareChildProcessSpecBuildsHybridSeccompFilter(t *testing.T) {
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("os.Chdir(%q) error = %v", tempDir, err)
+	}
+	defer func() {
+		if err := os.Chdir(previousWD); err != nil {
+			t.Fatalf("restore working directory error = %v", err)
+		}
+	}()
+
+	if err := os.WriteFile(filepath.Join(tempDir, "user.in"), []byte(""), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(user.in) error = %v", err)
+	}
+
+	task := RunningTask{
+		setting: &TaskConfig{
+			CPU:            2,
+			Memory:         64,
+			Output:         16,
+			Stack:          8,
+			MaxProcs:       16,
+			Command:        "/bin/true",
+			RunUID:         -1,
+			RunGID:         -1,
+			NoNewPrivs:     true,
+			SyscallBackend: syscallBackendHybrid,
+			OneTimeCalls:   []string{"execve"},
+			AllowedCalls:   []string{"read"},
+			AdditionCalls:  []string{"write"},
+		},
+		memoryLimit: 64 * 1024,
+	}
+
+	spec, err := task.prepareChildProcessSpec()
+	if err != nil {
+		t.Fatalf("prepareChildProcessSpec() error = %v", err)
+	}
+	defer closeChildIOFiles(spec.io)
+
+	if !spec.seccomp.enabled {
+		t.Fatal("prepareChildProcessSpec() seccomp.enabled = false, want true")
+	}
+	if len(spec.seccomp.filter) == 0 {
+		t.Fatal("prepareChildProcessSpec() seccomp.filter is empty")
+	}
+}
+
+func TestChildStageSeccompString(t *testing.T) {
+	if got := childStageSeccomp.String(); got != "install seccomp filter" {
+		t.Fatalf("childStageSeccomp.String() = %q", got)
+	}
+}
+
 func TestReleaseChildCgroupGateRetriesEINTR(t *testing.T) {
 	original := writeChildCgroupGate
 	t.Cleanup(func() {

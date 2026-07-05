@@ -52,9 +52,18 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 	if !tracer.inSyscall(pid) {
 		log.Debugf(">>Name %16v", getName(callID))
 
-		if !tracer.callPolicy.CheckID(callID) {
+		if state.seccompPrechecked && state.seccompPrecheckedSysno == callID {
+			state.seccompPrechecked = false
+			state.seccompPrecheckedSysno = 0
+			log.Debugf("syscall %s(%d) already checked by seccomp trace event", getName(callID), callID)
+		} else if !tracer.callPolicy.CheckID(callID) {
+			state.seccompPrechecked = false
+			state.seccompPrecheckedSysno = 0
 			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
 			return syscallCheckViolation
+		} else {
+			state.seccompPrechecked = false
+			state.seccompPrecheckedSysno = 0
 		}
 		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
 			log.Info(getName(callID))
@@ -72,5 +81,37 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 		log.Debugf("SYS_EXIT_GROUP")
 	}
 	tracer.setInSyscall(pid, !tracer.inSyscall(pid))
+	return syscallCheckOK
+}
+
+func (tracer *TracerDetect) checkSeccompTrace(pid int) syscallCheckResult {
+	state, ok := tracer.getTracee(pid)
+	if !ok {
+		log.Warnf("checkSeccompTrace called for unregistered pid %d", pid)
+		return syscallCheckTraceeGone
+	}
+
+	var regs syscall.PtraceRegs
+	err := ptraceGetRegs(pid, &regs)
+	if err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			log.Debugf("tracee pid=%d disappeared before seccomp trace regs fetch", pid)
+			return syscallCheckTraceeGone
+		}
+		log.Debugf("seccomp trace regs failed for pid=%d: %v", pid, err)
+		return syscallCheckTracerError
+	}
+
+	callID := getSyscallNumber(&regs)
+	log.Debugf("seccomp trace event pid=%d syscall=%s(%d)", pid, getName(callID), callID)
+	if tracer.inSyscall(pid) {
+		return syscallCheckOK
+	}
+	if !tracer.callPolicy.CheckID(callID) {
+		log.Infof("not allowed seccomp-traced syscall %d: %16v ", callID, getName(callID))
+		return syscallCheckViolation
+	}
+	state.seccompPrechecked = true
+	state.seccompPrecheckedSysno = callID
 	return syscallCheckOK
 }

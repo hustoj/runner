@@ -1,0 +1,13 @@
+{
+  "Name": "Hybrid syscall policy trace and audit",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 16,
+  "Result": 4,
+  "SyscallBackend": "hybrid",
+  "LogPath": "runner.log",
+  "SyscallPolicy": {
+    "Trace": ["getpid"],
+    "Audit": ["getppid"]
+  }
+}

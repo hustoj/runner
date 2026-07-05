@@ -17,4 +17,5 @@ tests/java/hs_err_pid*.log
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 .claude/
-.workflows/
+.workflow/
+.pi-subagents/

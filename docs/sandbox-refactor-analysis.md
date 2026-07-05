@@ -176,9 +176,9 @@ func (task *RunningTask) runProcess() bool {
 
 ### 配置灵活性
 
-**默认配置（保守安全）**：
+**默认配置字段（兼容旧 case，不代表 root 生产安全默认）**：
 ```go
-RunUID: -1              // 不降权，适用于已在容器内运行
+RunUID: -1              // 不主动降权；若 runner 以 root 启动会被启动安全校验拒绝
 RunGID: -1
 NoNewPrivs: true        // ✅ 默认开启，防止提权
 UseMountNS: false       // 默认关闭，避免复杂性

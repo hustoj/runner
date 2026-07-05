@@ -53,6 +53,10 @@ type TaskConfig struct {
 	parseErr error
 }
 
+var effectiveUID = os.Geteuid
+
+const rootPrivilegeDropRequiredError = "refusing to run as root without explicit non-root RunUID/RunGID privilege drop"
+
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
 
 const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
@@ -117,6 +121,21 @@ func (tc *TaskConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// ValidateLaunchSafety checks runtime safety constraints that depend on the current process identity.
+func (tc *TaskConfig) ValidateLaunchSafety() error {
+	if effectiveUID() != 0 {
+		return nil
+	}
+	if tc.hasExplicitNonRootCredentialDrop() {
+		return nil
+	}
+	return errors.New(rootPrivilegeDropRequiredError)
+}
+
+func (tc *TaskConfig) hasExplicitNonRootCredentialDrop() bool {
+	return tc.RunUID > 0 && tc.RunGID > 0
 }
 
 // ValidationWarnings returns non-fatal configuration diagnostics.
@@ -236,6 +255,9 @@ func LoadConfig() (*TaskConfig, error) {
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := cfg.ValidateLaunchSafety(); err != nil {
+		return nil, fmt.Errorf("unsafe configuration: %w", err)
 	}
 
 	return cfg, nil

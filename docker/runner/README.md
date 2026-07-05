@@ -19,6 +19,7 @@
 - `VOLUME /data`
 - `VOLUME /var/log/runner`
 - `CMD ["runner"]`
+- 镜像未设置 `USER`；以 root 启动时，`case.json` 必须显式配置非 root `RunUID` / `RunGID`，否则 runner 会拒绝启动
 
 ## 相关目录
 

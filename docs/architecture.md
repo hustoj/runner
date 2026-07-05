@@ -131,7 +131,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 ### 6.3 namespace / chroot / 降权
 
-[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
+[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。若 runner 父进程以 root 启动,`LoadConfig()` 和 `RunningTask.Run()` 会要求配置非 root `RunUID` / `RunGID`,否则拒绝启动,避免未降权提交程序继承 root 身份。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
 
 ## 7. 资源判杰契约
 

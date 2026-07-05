@@ -6,7 +6,7 @@
 
 - 解析并校验运行配置
 - 启动子进程并设置资源限制、工作目录、IO 重定向
-- 应用沙箱隔离能力，如 `chroot`、namespace、`no_new_privs`、降权
+- 应用沙箱隔离能力，如 `chroot`、namespace、`no_new_privs`、降权；当 runner 进程以 root 启动时，必须显式配置非 root `RunUID` / `RunGID`
 - 使用 ptrace 跟踪 syscall，并结合 allowlist / one-time policy 做拦截；Linux 上可通过 `SyscallBackend: "hybrid"` 额外启用 seccomp-BPF 作为主过滤边界
 - 采集时间与内存数据，输出统一 `Result`
 

@@ -50,6 +50,76 @@ func TestLoadConfigInvalidConfigurationReturnsErrorWithoutLogger(t *testing.T) {
 	})
 }
 
+func TestLoadConfigRejectsRootWithoutPrivilegeDrop(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+	effectiveUID = func() int { return 0 }
+
+	runWithTempCaseJSON(t, `{}`, func() {
+		SetLogger(nil)
+
+		_, err := LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() error = nil, want root privilege-drop rejection")
+		}
+		message := err.Error()
+		if !strings.Contains(message, "unsafe configuration") {
+			t.Fatalf("error = %q, want unsafe configuration message", message)
+		}
+		if !strings.Contains(message, rootPrivilegeDropRequiredError) {
+			t.Fatalf("error = %q, want %q", message, rootPrivilegeDropRequiredError)
+		}
+	})
+}
+
+func TestLoadConfigAllowsRootWithNonRootPrivilegeDrop(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+	effectiveUID = func() int { return 0 }
+
+	runWithTempCaseJSON(t, `{"RunUID":65534,"RunGID":65534}`, func() {
+		SetLogger(nil)
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.RunUID != 65534 || cfg.RunGID != 65534 {
+			t.Fatalf("LoadConfig() credentials = (%d,%d), want (65534,65534)", cfg.RunUID, cfg.RunGID)
+		}
+	})
+}
+
+func TestValidateLaunchSafetyRejectsRootTargetCredentials(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+	effectiveUID = func() int { return 0 }
+
+	tests := []struct {
+		name string
+		uid  int
+		gid  int
+	}{
+		{name: "no privilege drop", uid: -1, gid: -1},
+		{name: "root uid", uid: 0, gid: 65534},
+		{name: "root gid", uid: 65534, gid: 0},
+		{name: "root uid and gid", uid: 0, gid: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &TaskConfig{RunUID: tt.uid, RunGID: tt.gid}
+			err := cfg.ValidateLaunchSafety()
+			if err == nil {
+				t.Fatal("ValidateLaunchSafety() error = nil, want root privilege-drop rejection")
+			}
+			if !strings.Contains(err.Error(), rootPrivilegeDropRequiredError) {
+				t.Fatalf("ValidateLaunchSafety() error = %q, want %q", err, rootPrivilegeDropRequiredError)
+			}
+		})
+	}
+}
+
 func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -245,9 +315,12 @@ func TestResolveExecPreservesExplicitArgsPrecedence(t *testing.T) {
 
 func preserveConfigTestGlobals() func() {
 	previousLog := log
+	previousEffectiveUID := effectiveUID
+	effectiveUID = func() int { return 1000 }
 
 	return func() {
 		SetLogger(previousLog)
+		effectiveUID = previousEffectiveUID
 	}
 }
 

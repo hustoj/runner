@@ -3,6 +3,7 @@ package runner
 import (
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -24,6 +25,25 @@ func waitStatusForExit(t *testing.T, code int) syscall.WaitStatus {
 		t.Fatalf("unexpected process state type: %T", cmd.ProcessState.Sys())
 	}
 	return status
+}
+
+func TestRunRejectsRootWithoutPrivilegeDropBeforeStartingChild(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+	effectiveUID = func() int { return 0 }
+
+	task := RunningTask{setting: &TaskConfig{RunUID: -1, RunGID: -1}}
+
+	err := task.Run()
+	if err == nil {
+		t.Fatal("Run() error = nil, want root privilege-drop rejection")
+	}
+	if !strings.Contains(err.Error(), rootPrivilegeDropRequiredError) {
+		t.Fatalf("Run() error = %q, want %q", err, rootPrivilegeDropRequiredError)
+	}
+	if task.process != nil {
+		t.Fatalf("Run() started child process despite unsafe configuration: %#v", task.process)
+	}
 }
 
 func TestApplyExitCodeKeepsAcceptOnZeroExit(t *testing.T) {

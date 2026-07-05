@@ -29,6 +29,13 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 }
 
 func (task *RunningTask) Run() error {
+	if task.setting == nil {
+		return fmt.Errorf("task setting is nil")
+	}
+	if err := task.setting.ValidateLaunchSafety(); err != nil {
+		return fmt.Errorf("unsafe configuration: %w", err)
+	}
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := task.runProcess(); err != nil {

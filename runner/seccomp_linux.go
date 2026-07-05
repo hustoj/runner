@@ -18,8 +18,6 @@ const (
 	seccompDataArchOffset    = 4
 )
 
-var postSeccompStartupCalls = []string{"write", "close", "exit", "exit_group"}
-
 type childSeccompSpec struct {
 	enabled       bool
 	filter        []unix.SockFilter
@@ -31,18 +29,26 @@ func prepareChildSeccompSpec(setting *TaskConfig) (childSeccompSpec, error) {
 		return childSeccompSpec{}, nil
 	}
 
-	allowedCalls := effectiveAllowedCalls(setting)
-	allowedCalls = append(allowedCalls, postSeccompStartupCalls...)
-
-	allowedIDs, err := seccompSyscallIDs(allowedCalls)
+	policy, err := setting.compileSyscallPolicy()
 	if err != nil {
 		return childSeccompSpec{}, err
 	}
-	traceIDs, err := seccompSyscallIDs(setting.OneTimeCalls)
+	if err := validateHybridSyscallPolicy(setting.effectiveSyscallPolicy()); err != nil {
+		return childSeccompSpec{}, err
+	}
+	allowedIDs, err := seccompSyscallIDs(policy.SeccompAllowedCalls)
 	if err != nil {
 		return childSeccompSpec{}, err
 	}
-	if err := validateHybridOneTimePolicy(allowedIDs, traceIDs); err != nil {
+	traceIDs, err := seccompSyscallIDs(policy.SeccompTracedCalls)
+	if err != nil {
+		return childSeccompSpec{}, err
+	}
+	oneTimeIDs, err := seccompSyscallIDs(policy.Ptrace.OneTimeCalls)
+	if err != nil {
+		return childSeccompSpec{}, err
+	}
+	if err := validateHybridTracePolicy(allowedIDs, traceIDs, oneTimeIDs); err != nil {
 		return childSeccompSpec{}, err
 	}
 	filter, err := buildSeccompHybridFilter(allowedIDs, traceIDs)
@@ -77,15 +83,15 @@ func seccompSyscallIDs(names []string) ([]uint32, error) {
 	return ids, nil
 }
 
-func validateHybridOneTimePolicy(allowedIDs, traceIDs []uint32) error {
+func validateHybridTracePolicy(allowedIDs, traceIDs, oneTimeIDs []uint32) error {
 	for _, traceID := range traceIDs {
 		if containsUint32(allowedIDs, traceID) {
-			return fmt.Errorf("seccomp hybrid requires one-time syscall %s(%d) to be traced only; remove it from AllowedCalls/AdditionCalls", getName(uint64(traceID)), traceID)
+			return fmt.Errorf("seccomp hybrid requires traced syscall %s(%d) to be trace-only; remove it from the runtime allowlist", getName(uint64(traceID)), traceID)
 		}
 	}
 
 	execveID := uint32(syscall.SYS_EXECVE)
-	if !containsUint32(traceIDs, execveID) {
+	if !containsUint32(oneTimeIDs, execveID) {
 		return errors.New("seccomp hybrid requires execve in OneTimeCalls")
 	}
 	return nil
@@ -110,6 +116,9 @@ func buildSeccompHybridFilter(allowedSyscalls, tracedSyscalls []uint32) ([]unix.
 	filter = appendSeccompReturnRules(filter, allowedSyscalls, unix.SECCOMP_RET_ALLOW)
 	filter = appendSeccompReturnRules(filter, tracedSyscalls, unix.SECCOMP_RET_TRACE)
 	filter = append(filter, seccompStmt(unix.BPF_RET|unix.BPF_K, unix.SECCOMP_RET_KILL_PROCESS))
+	if len(filter) > unix.BPF_MAXINSNS {
+		return nil, fmt.Errorf("seccomp filter exceeds instruction limit: %d > %d", len(filter), unix.BPF_MAXINSNS)
+	}
 	return filter, nil
 }
 
@@ -140,6 +149,9 @@ func installSeccompFilter(spec childSeccompSpec) syscall.Errno {
 		return 0
 	}
 	if len(spec.filter) == 0 {
+		return syscall.EINVAL
+	}
+	if len(spec.filter) > unix.BPF_MAXINSNS {
 		return syscall.EINVAL
 	}
 

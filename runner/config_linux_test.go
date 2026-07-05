@@ -14,6 +14,10 @@ func TestValidateRejectsInvalidSyscallName(t *testing.T) {
 		{"OneTimeCalls", `{"OneTimeCalls":["not_a_real_syscall"]}`, `invalid syscall in oneTimeCalls: "not_a_real_syscall"`},
 		{"AllowedCalls", `{"AllowedCalls":["bogus_call"]}`, `invalid syscall in allowedCalls: "bogus_call"`},
 		{"AdditionCalls", `{"AdditionCalls":["fake_syscall"]}`, `invalid syscall in additionCalls: "fake_syscall"`},
+		{"SyscallPolicyAllow", `{"SyscallPolicy":{"Allow":["fake_syscall"]}}`, `invalid syscall in syscallPolicy.allow: "fake_syscall"`},
+		{"SyscallPolicyDeny", `{"SyscallPolicy":{"Deny":["fake_syscall"]}}`, `invalid syscall in syscallPolicy.deny: "fake_syscall"`},
+		{"SyscallPolicyTrace", `{"SyscallPolicy":{"Trace":["fake_syscall"]}}`, `invalid syscall in syscallPolicy.trace: "fake_syscall"`},
+		{"SyscallPolicyAudit", `{"SyscallPolicy":{"Audit":["fake_syscall"]}}`, `invalid syscall in syscallPolicy.audit: "fake_syscall"`},
 	}
 
 	for _, tt := range tests {
@@ -70,6 +74,27 @@ func TestValidateAcceptsHybridSyscallBackend(t *testing.T) {
 		}
 		if got := cfg.effectiveSyscallBackend(); got != syscallBackendHybrid {
 			t.Fatalf("effectiveSyscallBackend() = %q, want %q", got, syscallBackendHybrid)
+		}
+	})
+}
+
+func TestValidateRejectsHybridDenyOfStartupProtocolCalls(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+
+	json := `{"SyscallBackend":"hybrid","NoNewPrivs":true,"OneTimeCalls":["execve"],"AllowedCalls":["read"],"SyscallPolicy":{"Deny":["write"]}}`
+	runWithTempCaseJSON(t, json, func() {
+		SetLogger(nil)
+
+		_, err := LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() error = nil, want startup protocol denial rejection")
+		}
+		if !strings.Contains(err.Error(), `syscallPolicy.deny cannot include "write"`) {
+			t.Fatalf("LoadConfig() error = %q, want denied startup syscall name", err)
+		}
+		if !strings.Contains(err.Error(), "hybrid startup protocol") {
+			t.Fatalf("LoadConfig() error = %q, want startup protocol context", err)
 		}
 	})
 }

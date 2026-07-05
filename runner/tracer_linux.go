@@ -52,19 +52,11 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 	if !tracer.inSyscall(pid) {
 		log.Debugf(">>Name %16v", getName(callID))
 
-		if state.seccompPrechecked && state.seccompPrecheckedSysno == callID {
-			state.seccompPrechecked = false
-			state.seccompPrecheckedSysno = 0
-			log.Debugf("syscall %s(%d) already checked by seccomp trace event", getName(callID), callID)
-		} else if !tracer.callPolicy.CheckID(callID) {
-			state.seccompPrechecked = false
-			state.seccompPrecheckedSysno = 0
+		if !tracer.callPolicy.CheckID(callID) {
 			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
 			return syscallCheckViolation
-		} else {
-			state.seccompPrechecked = false
-			state.seccompPrecheckedSysno = 0
 		}
+		tracer.auditSyscall(pid, callID, "ptrace")
 		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
 			log.Info(getName(callID))
 		}
@@ -85,7 +77,7 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 }
 
 func (tracer *TracerDetect) checkSeccompTrace(pid int) syscallCheckResult {
-	state, ok := tracer.getTracee(pid)
+	_, ok := tracer.getTracee(pid)
 	if !ok {
 		log.Warnf("checkSeccompTrace called for unregistered pid %d", pid)
 		return syscallCheckTraceeGone
@@ -104,14 +96,17 @@ func (tracer *TracerDetect) checkSeccompTrace(pid int) syscallCheckResult {
 
 	callID := getSyscallNumber(&regs)
 	log.Debugf("seccomp trace event pid=%d syscall=%s(%d)", pid, getName(callID), callID)
-	if tracer.inSyscall(pid) {
-		return syscallCheckOK
-	}
 	if !tracer.callPolicy.CheckID(callID) {
 		log.Infof("not allowed seccomp-traced syscall %d: %16v ", callID, getName(callID))
 		return syscallCheckViolation
 	}
-	state.seccompPrechecked = true
-	state.seccompPrecheckedSysno = callID
+	tracer.auditSyscall(pid, callID, "seccomp")
 	return syscallCheckOK
+}
+
+func (tracer *TracerDetect) auditSyscall(pid int, callID uint64, source string) {
+	if tracer.callPolicy == nil || !tracer.callPolicy.ShouldAudit(callID) || log == nil {
+		return
+	}
+	log.Infof("audit syscall source=%s pid=%d syscall=%s(%d)", source, pid, getName(callID), callID)
 }

@@ -23,24 +23,40 @@ func waitOptions() int {
 	return syscall.WALL
 }
 
+var (
+	ptraceSyscallCall = syscall.PtraceSyscall
+	ptraceContCall    = syscall.PtraceCont
+)
+
 func (process *Process) Continue() bool {
 	return process.ContinueWithSignal(0)
 }
 
 func (process *Process) ContinueWithSignal(sig int) bool {
+	return process.ContinueWithMode(traceResumeSyscallStops, sig)
+}
+
+func (process *Process) ContinueWithMode(mode traceResumeMode, sig int) bool {
 	if process.IsKilled {
 		return false
 	}
-	err := syscall.PtraceSyscall(process.CurrentPid, sig)
+	err := resumeTracee(process.CurrentPid, mode, sig)
 	if err != nil {
-		log.Infof("PtraceSyscall(sig=%d): err %v", sig, err)
+		log.Infof("ptrace resume mode=%d sig=%d: err %v", mode, sig, err)
 		return false
 	}
 	return true
 }
 
+func resumeTracee(pid int, mode traceResumeMode, sig int) error {
+	if mode == traceResumeEventStops {
+		return ptraceContCall(pid, sig)
+	}
+	return ptraceSyscallCall(pid, sig)
+}
+
 func ptraceCont(pid int, sig int) error {
-	return syscall.PtraceCont(pid, sig)
+	return ptraceContCall(pid, sig)
 }
 
 func (process *Process) IsInitialTraceStop() bool {

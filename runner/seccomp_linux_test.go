@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"strings"
 	"syscall"
 	"testing"
 
@@ -62,6 +63,101 @@ func TestPrepareChildSeccompSpecIncludesStartupFailureReportingCalls(t *testing.
 	}
 }
 
+func TestPrepareChildSeccompSpecTracesStructuredPolicyCalls(t *testing.T) {
+	spec, err := prepareChildSeccompSpec(&TaskConfig{
+		SyscallBackend: syscallBackendHybrid,
+		OneTimeCalls:   []string{"execve"},
+		AllowedCalls:   []string{"read"},
+		SyscallPolicy: SyscallPolicyConfig{
+			Trace: []string{"getpid"},
+			Audit: []string{"getppid"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareChildSeccompSpec() error = %v", err)
+	}
+
+	for _, syscallID := range []uint32{
+		uint32(syscall.SYS_EXECVE),
+		uint32(syscall.SYS_GETPID),
+		uint32(syscall.SYS_GETPPID),
+	} {
+		action, ok := seccompFilterActionForSyscall(spec.filter, syscallID)
+		if !ok {
+			t.Fatalf("seccomp filter has no rule for syscall %d", syscallID)
+		}
+		if action != unix.SECCOMP_RET_TRACE {
+			t.Fatalf("syscall %d seccomp action = %#x, want TRACE", syscallID, action)
+		}
+	}
+
+	action, ok := seccompFilterActionForSyscall(spec.filter, uint32(syscall.SYS_READ))
+	if !ok {
+		t.Fatal("seccomp filter has no read rule")
+	}
+	if action != unix.SECCOMP_RET_ALLOW {
+		t.Fatalf("read seccomp action = %#x, want ALLOW", action)
+	}
+}
+
+func TestPrepareChildSeccompSpecRemovesDeniedAllowedCalls(t *testing.T) {
+	spec, err := prepareChildSeccompSpec(&TaskConfig{
+		SyscallBackend: syscallBackendHybrid,
+		OneTimeCalls:   []string{"execve"},
+		AllowedCalls:   []string{"read", "write"},
+		SyscallPolicy: SyscallPolicyConfig{
+			Allow: []string{"fstat"},
+			Deny:  []string{"read", "fstat"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareChildSeccompSpec() error = %v", err)
+	}
+
+	for _, syscallID := range []uint32{uint32(syscall.SYS_READ), uint32(syscall.SYS_FSTAT)} {
+		if action, ok := seccompFilterActionForSyscall(spec.filter, syscallID); ok {
+			t.Fatalf("denied syscall %d has seccomp action %#x, want no allow/trace rule", syscallID, action)
+		}
+	}
+	action, ok := seccompFilterActionForSyscall(spec.filter, uint32(syscall.SYS_WRITE))
+	if !ok {
+		t.Fatal("seccomp filter has no write rule")
+	}
+	if action != unix.SECCOMP_RET_ALLOW {
+		t.Fatalf("write seccomp action = %#x, want ALLOW", action)
+	}
+}
+
+func TestPrepareChildSeccompSpecRejectsDeniedStartupProtocolCalls(t *testing.T) {
+	_, err := prepareChildSeccompSpec(&TaskConfig{
+		SyscallBackend: syscallBackendHybrid,
+		OneTimeCalls:   []string{"execve"},
+		AllowedCalls:   []string{"read"},
+		SyscallPolicy:  SyscallPolicyConfig{Deny: []string{"write"}},
+	})
+	if err == nil {
+		t.Fatal("prepareChildSeccompSpec() error = nil, want startup protocol denial rejection")
+	}
+	if !strings.Contains(err.Error(), "hybrid startup protocol") {
+		t.Fatalf("prepareChildSeccompSpec() error = %q, want startup protocol context", err)
+	}
+}
+
+func TestPrepareChildSeccompSpecRejectsDenyTraceOverlap(t *testing.T) {
+	_, err := prepareChildSeccompSpec(&TaskConfig{
+		SyscallBackend: syscallBackendHybrid,
+		OneTimeCalls:   []string{"execve"},
+		AllowedCalls:   []string{"read"},
+		SyscallPolicy: SyscallPolicyConfig{
+			Trace: []string{"getpid"},
+			Deny:  []string{"getpid"},
+		},
+	})
+	if err == nil {
+		t.Fatal("prepareChildSeccompSpec() error = nil, want deny/trace overlap rejection")
+	}
+}
+
 func TestPrepareChildSeccompSpecRejectsPermanentExecveAllow(t *testing.T) {
 	_, err := prepareChildSeccompSpec(&TaskConfig{
 		SyscallBackend: syscallBackendHybrid,
@@ -92,6 +188,39 @@ func TestPrepareChildSeccompSpecRequiresExecveOneTime(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("prepareChildSeccompSpec() error = nil, want missing execve one-time rejection")
+	}
+}
+
+func TestPrepareChildSeccompSpecRequiresExecveInOneTimeCalls(t *testing.T) {
+	_, err := prepareChildSeccompSpec(&TaskConfig{
+		SyscallBackend: syscallBackendHybrid,
+		OneTimeCalls:   []string{"getpid"},
+		AllowedCalls:   []string{"read"},
+		SyscallPolicy:  SyscallPolicyConfig{Trace: []string{"execve"}},
+	})
+	if err == nil {
+		t.Fatal("prepareChildSeccompSpec() error = nil, want execve one-time rejection")
+	}
+}
+
+func TestBuildSeccompHybridFilterRejectsTooManyInstructions(t *testing.T) {
+	allowedSyscalls := make([]uint32, (unix.BPF_MAXINSNS-5)/2+1)
+	_, err := buildSeccompHybridFilter(allowedSyscalls, nil)
+	if err == nil {
+		t.Fatal("buildSeccompHybridFilter() error = nil, want instruction limit rejection")
+	}
+	if !strings.Contains(err.Error(), "seccomp filter exceeds") {
+		t.Fatalf("buildSeccompHybridFilter() error = %q, want instruction limit context", err)
+	}
+}
+
+func TestInstallSeccompFilterRejectsTooManyInstructions(t *testing.T) {
+	errno := installSeccompFilter(childSeccompSpec{
+		enabled: true,
+		filter:  make([]unix.SockFilter, unix.BPF_MAXINSNS+1),
+	})
+	if errno != syscall.EINVAL {
+		t.Fatalf("installSeccompFilter() errno = %v, want EINVAL", errno)
 	}
 }
 

@@ -32,6 +32,56 @@ func TestProcessTraceStopClassification(t *testing.T) {
 	assert.False(t, process.IsPtraceEventStop())
 }
 
+func TestProcessContinueWithModeUsesPtraceSyscallForSyscallStops(t *testing.T) {
+	originalSyscall := ptraceSyscallCall
+	originalCont := ptraceContCall
+	t.Cleanup(func() {
+		ptraceSyscallCall = originalSyscall
+		ptraceContCall = originalCont
+	})
+
+	var syscallCalled bool
+	ptraceSyscallCall = func(pid int, sig int) error {
+		syscallCalled = true
+		assert.Equal(t, 123, pid)
+		assert.Equal(t, int(syscall.SIGTERM), sig)
+		return nil
+	}
+	ptraceContCall = func(pid int, sig int) error {
+		t.Fatalf("PtraceCont called with pid=%d sig=%d, want PtraceSyscall", pid, sig)
+		return nil
+	}
+
+	process := &Process{CurrentPid: 123}
+	assert.True(t, process.ContinueWithMode(traceResumeSyscallStops, int(syscall.SIGTERM)))
+	assert.True(t, syscallCalled)
+}
+
+func TestProcessContinueWithModeUsesPtraceContForEventStops(t *testing.T) {
+	originalSyscall := ptraceSyscallCall
+	originalCont := ptraceContCall
+	t.Cleanup(func() {
+		ptraceSyscallCall = originalSyscall
+		ptraceContCall = originalCont
+	})
+
+	var contCalled bool
+	ptraceSyscallCall = func(pid int, sig int) error {
+		t.Fatalf("PtraceSyscall called with pid=%d sig=%d, want PtraceCont", pid, sig)
+		return nil
+	}
+	ptraceContCall = func(pid int, sig int) error {
+		contCalled = true
+		assert.Equal(t, 123, pid)
+		assert.Equal(t, int(syscall.SIGUSR1), sig)
+		return nil
+	}
+
+	process := &Process{CurrentPid: 123}
+	assert.True(t, process.ContinueWithMode(traceResumeEventStops, int(syscall.SIGUSR1)))
+	assert.True(t, contCalled)
+}
+
 func TestCallPolicyConsume(t *testing.T) {
 	policy := &CallPolicy{
 		oneTimeCalls: map[uint64]bool{uint64(syscall.SYS_EXECVE): true},
@@ -40,6 +90,17 @@ func TestCallPolicyConsume(t *testing.T) {
 
 	policy.Consume(uint64(syscall.SYS_EXECVE))
 	assert.False(t, policy.CheckID(uint64(syscall.SYS_EXECVE)))
+}
+
+func TestCallPolicyAuditCalls(t *testing.T) {
+	policy, err := makeCallPolicy(callPolicySpec{
+		AllowedCalls: []string{"read"},
+		AuditCalls:   []string{"read"},
+	})
+	assert.NoError(t, err)
+	assert.True(t, policy.CheckID(uint64(syscall.SYS_READ)))
+	assert.True(t, policy.ShouldAudit(uint64(syscall.SYS_READ)))
+	assert.False(t, policy.ShouldAudit(uint64(syscall.SYS_WRITE)))
 }
 
 func TestProcessReturnsPendingStopAfterTraceeRegistration(t *testing.T) {

@@ -23,6 +23,10 @@ func (process *Process) ContinueWithSignal(_ int) bool {
 	panic("Process.ContinueWithSignal is not supported on darwin")
 }
 
+func (process *Process) ContinueWithMode(_ traceResumeMode, _ int) bool {
+	panic("Process.ContinueWithMode is not supported on darwin")
+}
+
 func (process *Process) IsInitialTraceStop() bool {
 	panic("Process.IsInitialTraceStop is not supported on darwin")
 }

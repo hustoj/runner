@@ -163,6 +163,18 @@ func TestChildStageSeccompString(t *testing.T) {
 	}
 }
 
+func TestTraceResumeModeUsesEventStopsForHybridOnly(t *testing.T) {
+	defaultTask := RunningTask{setting: &TaskConfig{}}
+	if got := defaultTask.traceResumeMode(); got != traceResumeSyscallStops {
+		t.Fatalf("default traceResumeMode() = %d, want syscall stops", got)
+	}
+
+	hybridTask := RunningTask{setting: &TaskConfig{SyscallBackend: syscallBackendHybrid}}
+	if got := hybridTask.traceResumeMode(); got != traceResumeEventStops {
+		t.Fatalf("hybrid traceResumeMode() = %d, want event stops", got)
+	}
+}
+
 func TestReleaseChildCgroupGateRetriesEINTR(t *testing.T) {
 	original := writeChildCgroupGate
 	t.Cleanup(func() {

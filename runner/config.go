@@ -41,8 +41,9 @@ type TaskConfig struct {
 	OneTimeCalls   []string `default:"execve"`
 	AllowedCalls   []string `default:"read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
 	AdditionCalls  []string `default:""`
-	SyscallBackend string   `default:"ptrace"`
-	Verbose        bool     `default:"false"`
+	SyscallPolicy  SyscallPolicyConfig
+	SyscallBackend string `default:"ptrace"`
+	Verbose        bool   `default:"false"`
 	Name           string
 	Result         int `default:"4"`
 
@@ -96,14 +97,23 @@ func (tc *TaskConfig) Validate() error {
 	if err := validateSyscallNames("additionCalls", tc.AdditionCalls); err != nil {
 		return err
 	}
-	if err := validateSyscallBackend(tc.effectiveSyscallBackend()); err != nil {
+	if err := tc.validateSyscallPolicy(); err != nil {
 		return err
 	}
-	if tc.effectiveSyscallBackend() == syscallBackendHybrid && !tc.NoNewPrivs {
+	backend := tc.effectiveSyscallBackend()
+	if err := validateSyscallBackend(backend); err != nil {
+		return err
+	}
+	if backend == syscallBackendHybrid && !tc.NoNewPrivs {
 		return errors.New("syscallBackend hybrid requires NoNewPrivs")
 	}
-	if err := validateSyscallBackendForPlatform(tc.effectiveSyscallBackend()); err != nil {
+	if err := validateSyscallBackendForPlatform(backend); err != nil {
 		return err
+	}
+	if backend == syscallBackendHybrid {
+		if err := validateHybridSyscallPolicy(tc.effectiveSyscallPolicy()); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -10,6 +10,13 @@ type processStop struct {
 	rusage syscall.Rusage
 }
 
+type traceResumeMode uint8
+
+const (
+	traceResumeSyscallStops traceResumeMode = iota
+	traceResumeEventStops
+)
+
 type Process struct {
 	Pid          int
 	CurrentPid   int

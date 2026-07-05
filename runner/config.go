@@ -38,12 +38,14 @@ type TaskConfig struct {
 	UseUTSNS   bool   `default:"false"` // Isolate hostname/domainname
 	UseNetNS   bool   `default:"false"` // Isolate network stack
 
-	OneTimeCalls  []string `default:"execve"`
-	AllowedCalls  []string `default:"read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
-	AdditionCalls []string `default:""`
-	Verbose       bool     `default:"false"`
-	Name          string
-	Result        int `default:"4"`
+	OneTimeCalls   []string `default:"execve"`
+	AllowedCalls   []string `default:"read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn"`
+	AdditionCalls  []string `default:""`
+	SyscallPolicy  SyscallPolicyConfig
+	SyscallBackend string `default:"ptrace"`
+	Verbose        bool   `default:"false"`
+	Name           string
+	Result         int `default:"4"`
 
 	//LogPath  string `default:"/var/log/runner/runner.log"`
 	LogPath  string `default:"/dev/stderr"`
@@ -54,6 +56,11 @@ type TaskConfig struct {
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
 
 const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
+
+const (
+	syscallBackendPtrace = "ptrace"
+	syscallBackendHybrid = "hybrid"
+)
 
 // Validate checks if the configuration is valid.
 // Returns an error if any required constraints are violated.
@@ -90,6 +97,24 @@ func (tc *TaskConfig) Validate() error {
 	if err := validateSyscallNames("additionCalls", tc.AdditionCalls); err != nil {
 		return err
 	}
+	if err := tc.validateSyscallPolicy(); err != nil {
+		return err
+	}
+	backend := tc.effectiveSyscallBackend()
+	if err := validateSyscallBackend(backend); err != nil {
+		return err
+	}
+	if backend == syscallBackendHybrid && !tc.NoNewPrivs {
+		return errors.New("syscallBackend hybrid requires NoNewPrivs")
+	}
+	if err := validateSyscallBackendForPlatform(backend); err != nil {
+		return err
+	}
+	if backend == syscallBackendHybrid {
+		if err := validateHybridSyscallPolicy(tc.effectiveSyscallPolicy()); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -121,6 +146,22 @@ func (tc *TaskConfig) LogValidationWarnings() {
 		}
 
 		fmt.Fprintf(os.Stderr, "WARN: %s\n", warning)
+	}
+}
+
+func (tc *TaskConfig) effectiveSyscallBackend() string {
+	if tc.SyscallBackend == "" {
+		return syscallBackendPtrace
+	}
+	return tc.SyscallBackend
+}
+
+func validateSyscallBackend(backend string) error {
+	switch backend {
+	case syscallBackendPtrace, syscallBackendHybrid:
+		return nil
+	default:
+		return fmt.Errorf("syscallBackend must be %q or %q (got %q)", syscallBackendPtrace, syscallBackendHybrid, backend)
 	}
 }
 

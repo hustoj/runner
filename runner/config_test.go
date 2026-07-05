@@ -106,6 +106,58 @@ func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
 	})
 }
 
+func TestSyscallBackendDefaultsToPtrace(t *testing.T) {
+	cfg := &TaskConfig{}
+
+	if got := cfg.effectiveSyscallBackend(); got != syscallBackendPtrace {
+		t.Fatalf("effectiveSyscallBackend() = %q, want %q", got, syscallBackendPtrace)
+	}
+}
+
+func TestValidateRejectsUnknownSyscallBackend(t *testing.T) {
+	cfg := &TaskConfig{
+		CPU:            1,
+		Memory:         1,
+		Output:         1,
+		Stack:          1,
+		MaxProcs:       1,
+		RunUID:         -1,
+		RunGID:         -1,
+		NoNewPrivs:     true,
+		SyscallBackend: "unknown",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want invalid syscall backend")
+	}
+	if !strings.Contains(err.Error(), "syscallBackend must be") {
+		t.Fatalf("Validate() error = %q, want syscallBackend validation", err)
+	}
+}
+
+func TestValidateRejectsHybridWithoutNoNewPrivs(t *testing.T) {
+	cfg := &TaskConfig{
+		CPU:            1,
+		Memory:         1,
+		Output:         1,
+		Stack:          1,
+		MaxProcs:       1,
+		RunUID:         -1,
+		RunGID:         -1,
+		NoNewPrivs:     false,
+		SyscallBackend: syscallBackendHybrid,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want hybrid without NoNewPrivs rejection")
+	}
+	if !strings.Contains(err.Error(), "requires NoNewPrivs") {
+		t.Fatalf("Validate() error = %q, want NoNewPrivs validation", err)
+	}
+}
+
 func TestParseCommandFallbackUsesShlex(t *testing.T) {
 	tc := &TaskConfig{Command: `  /usr/bin/java   "Main Class"  `}
 	if got := tc.GetCommand(); got != "/usr/bin/java" {

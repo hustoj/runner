@@ -1,0 +1,12 @@
+{
+  "Name": "Hybrid syscall policy deny overrides inherited allow",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 16,
+  "Result": 10,
+  "SyscallBackend": "hybrid",
+  "AdditionCalls": ["getpid"],
+  "SyscallPolicy": {
+    "Deny": ["getpid"]
+  }
+}

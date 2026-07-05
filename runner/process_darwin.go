@@ -5,9 +5,10 @@ package runner
 import "errors"
 
 const (
-	ptraceEventFork  = 1
-	ptraceEventVFork = 2
-	ptraceEventClone = 3
+	ptraceEventFork    = 1
+	ptraceEventVFork   = 2
+	ptraceEventClone   = 3
+	ptraceEventSeccomp = 4
 )
 
 func waitOptions() int {
@@ -20,6 +21,10 @@ func (process *Process) Continue() bool {
 
 func (process *Process) ContinueWithSignal(_ int) bool {
 	panic("Process.ContinueWithSignal is not supported on darwin")
+}
+
+func (process *Process) ContinueWithMode(_ traceResumeMode, _ int) bool {
+	panic("Process.ContinueWithMode is not supported on darwin")
 }
 
 func (process *Process) IsInitialTraceStop() bool {
@@ -42,6 +47,6 @@ func (process *Process) GetEventPid() (int, error) {
 	return 0, errors.New("Process.GetEventPid is not supported on darwin")
 }
 
-func (process *Process) SetPtraceOptions() error {
+func (process *Process) SetPtraceOptions(_ bool) error {
 	return errors.New("Process.SetPtraceOptions is not supported on darwin")
 }

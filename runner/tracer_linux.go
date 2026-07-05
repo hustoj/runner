@@ -56,6 +56,7 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
 			return syscallCheckViolation
 		}
+		tracer.auditSyscall(pid, callID, "ptrace")
 		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
 			log.Info(getName(callID))
 		}
@@ -73,4 +74,39 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 	}
 	tracer.setInSyscall(pid, !tracer.inSyscall(pid))
 	return syscallCheckOK
+}
+
+func (tracer *TracerDetect) checkSeccompTrace(pid int) syscallCheckResult {
+	_, ok := tracer.getTracee(pid)
+	if !ok {
+		log.Warnf("checkSeccompTrace called for unregistered pid %d", pid)
+		return syscallCheckTraceeGone
+	}
+
+	var regs syscall.PtraceRegs
+	err := ptraceGetRegs(pid, &regs)
+	if err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			log.Debugf("tracee pid=%d disappeared before seccomp trace regs fetch", pid)
+			return syscallCheckTraceeGone
+		}
+		log.Debugf("seccomp trace regs failed for pid=%d: %v", pid, err)
+		return syscallCheckTracerError
+	}
+
+	callID := getSyscallNumber(&regs)
+	log.Debugf("seccomp trace event pid=%d syscall=%s(%d)", pid, getName(callID), callID)
+	if !tracer.callPolicy.CheckID(callID) {
+		log.Infof("not allowed seccomp-traced syscall %d: %16v ", callID, getName(callID))
+		return syscallCheckViolation
+	}
+	tracer.auditSyscall(pid, callID, "seccomp")
+	return syscallCheckOK
+}
+
+func (tracer *TracerDetect) auditSyscall(pid int, callID uint64, source string) {
+	if tracer.callPolicy == nil || !tracer.callPolicy.ShouldAudit(callID) || log == nil {
+		return
+	}
+	log.Infof("audit syscall source=%s pid=%d syscall=%s(%d)", source, pid, getName(callID), callID)
 }

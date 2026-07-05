@@ -42,6 +42,9 @@ pre-commit-run:
 testall: prepare
 	cd tests/general;make
 	cd tests/clone-syscall-phase;make
+	cd tests/clone-syscall-phase-hybrid;make
+	cd tests/syscall-policy-deny-hybrid;make
+	cd tests/syscall-policy-trace-audit-hybrid;make
 	cd tests/fork;make
 	cd tests/mle;make
 	cd tests/mle2;make

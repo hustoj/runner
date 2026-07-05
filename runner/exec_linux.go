@@ -37,6 +37,8 @@ const (
 	childStageSandboxSetgid
 	childStageSandboxSetuid
 	childStagePtraceTraceme
+	childStagePtraceSync
+	childStageSeccomp
 	childStageExec
 )
 
@@ -93,6 +95,10 @@ func (s childStartupStage) String() string {
 		return "setuid"
 	case childStagePtraceTraceme:
 		return "ptrace traceme"
+	case childStagePtraceSync:
+		return "ptrace sync"
+	case childStageSeccomp:
+		return "install seccomp filter"
 	case childStageExec:
 		return "execve"
 	default:
@@ -116,6 +122,7 @@ type childProcessSpec struct {
 	io           childIOFiles
 	exec         childExecSpec
 	sandbox      childSandboxSpec
+	seccomp      childSeccompSpec
 	cpuLimit     syscall.Rlimit
 	outputLimit  syscall.Rlimit
 	stackLimit   syscall.Rlimit
@@ -130,6 +137,15 @@ func openChildIOFile(path string, flags int, perm uint32) (int, error) {
 
 func ptraceTraceme() syscall.Errno {
 	_, _, errno := syscall.RawSyscall(syscall.SYS_PTRACE, syscall.PTRACE_TRACEME, 0, 0)
+	return errno
+}
+
+func stopForPtraceOptions() syscall.Errno {
+	pid, _, errno := syscall.RawSyscall(syscall.SYS_GETPID, 0, 0, 0)
+	if errno != 0 {
+		return errno
+	}
+	_, _, errno = syscall.RawSyscall(syscall.SYS_KILL, pid, uintptr(syscall.SIGSTOP), 0)
 	return errno
 }
 
@@ -208,6 +224,13 @@ func (task *RunningTask) runProcess() error {
 		waitChildStartupFailure(pid)
 		return fmt.Errorf("release child cgroup gate: %w", err)
 	}
+	if shouldSyncSeccompTracee(spec.seccomp) {
+		if err := prepareHybridSeccompTracee(pid); err != nil {
+			_ = syscall.Close(startupPipeFDs[0])
+			killChildAfterStartupError(pid)
+			return fmt.Errorf("prepare hybrid seccomp tracee: %w", err)
+		}
+	}
 
 	failure, err := readChildStartupFailure(startupPipeFDs[0])
 	_ = syscall.Close(startupPipeFDs[0])
@@ -244,6 +267,11 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		closeChildIOFiles(ioFiles)
 		return childProcessSpec{}, err
 	}
+	seccompSpec, err := prepareChildSeccompSpec(task.setting)
+	if err != nil {
+		closeChildIOFiles(ioFiles)
+		return childProcessSpec{}, err
+	}
 
 	timeLimit := uint64(task.setting.CPU)
 	stackLimit := uint64(task.setting.Stack) << 20
@@ -254,6 +282,7 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		io:      ioFiles,
 		exec:    execSpec,
 		sandbox: sandboxSpec,
+		seccomp: seccompSpec,
 		cpuLimit: syscall.Rlimit{
 			Max: enforcedCPULimit,
 			Cur: enforcedCPULimit,
@@ -388,6 +417,94 @@ func waitChildStartupFailure(pid int) {
 	}
 }
 
+func shouldSyncSeccompTracee(spec childSeccompSpec) bool {
+	return spec.enabled && len(spec.traceSyscalls) > 0
+}
+
+func prepareHybridSeccompTracee(pid int) error {
+	status, err := waitForTraceeStop(pid)
+	if err != nil {
+		return fmt.Errorf("wait ptrace sync stop: %w", err)
+	}
+	if !status.Stopped() || status.StopSignal() != syscall.SIGSTOP {
+		return fmt.Errorf("unexpected hybrid ptrace sync status: %s", describeWaitStatus(status))
+	}
+	if err := setPtraceOptions(pid, true); err != nil {
+		return fmt.Errorf("set ptrace options before seccomp install: %w", err)
+	}
+	if err := ptraceCont(pid, 0); err != nil {
+		return fmt.Errorf("continue child to seccomp execve event: %w", err)
+	}
+
+	status, err = waitForTraceeStop(pid)
+	if err != nil {
+		return fmt.Errorf("wait seccomp execve event: %w", err)
+	}
+	if !isPtraceEvent(status, ptraceEventSeccomp) {
+		return fmt.Errorf("unexpected hybrid seccomp event status: %s", describeWaitStatus(status))
+	}
+	if err := verifyStartupSeccompEvent(pid); err != nil {
+		return err
+	}
+	if err := ptraceCont(pid, 0); err != nil {
+		return fmt.Errorf("continue child after seccomp execve event: %w", err)
+	}
+	return nil
+}
+
+func waitForTraceeStop(pid int) (syscall.WaitStatus, error) {
+	var status syscall.WaitStatus
+	var rusage syscall.Rusage
+	for {
+		waitedPID, err := syscall.Wait4(pid, &status, 0, &rusage)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if waitedPID != pid {
+			return 0, fmt.Errorf("wait4 returned pid %d, want %d", waitedPID, pid)
+		}
+		return status, nil
+	}
+}
+
+func isPtraceEvent(status syscall.WaitStatus, event int) bool {
+	return status.Stopped() && status.StopSignal() == syscall.SIGTRAP && status.TrapCause() == event
+}
+
+func verifyStartupSeccompEvent(pid int) error {
+	var regs syscall.PtraceRegs
+	if err := ptraceGetRegs(pid, &regs); err != nil {
+		return fmt.Errorf("read regs for startup seccomp event: %w", err)
+	}
+	callID := getSyscallNumber(&regs)
+	if callID != uint64(syscall.SYS_EXECVE) {
+		return fmt.Errorf("unexpected startup seccomp syscall %s(%d), want execve", getName(callID), callID)
+	}
+	return nil
+}
+
+func describeWaitStatus(status syscall.WaitStatus) string {
+	switch {
+	case status.Stopped():
+		return fmt.Sprintf("stopped signal=%v trap=%d", status.StopSignal(), status.TrapCause())
+	case status.Exited():
+		return fmt.Sprintf("exited code=%d", status.ExitStatus())
+	case status.Signaled():
+		return fmt.Sprintf("signaled signal=%v", status.Signal())
+	default:
+		return fmt.Sprintf("raw=%#x", int(status))
+	}
+}
+
+func killChildAfterStartupError(pid int) {
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	waitChildStartupFailure(pid)
+}
+
 func releaseChildCgroupGate(fd int) error {
 	defer func() {
 		_ = syscall.Close(fd)
@@ -458,6 +575,15 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 	}
 	if errno := ptraceTraceme(); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStagePtraceTraceme, errno)
+	}
+	if shouldSyncSeccompTracee(spec.seccomp) {
+		if errno := stopForPtraceOptions(); errno != 0 {
+			reportChildStartupFailure(startupPipeWriteFD, childStagePtraceSync, errno)
+		}
+	}
+	// Install after PTRACE_TRACEME so runtime policy does not need to allow ptrace.
+	if errno := installSeccompFilter(spec.seccomp); errno != 0 {
+		reportChildStartupFailure(startupPipeWriteFD, childStageSeccomp, errno)
 	}
 
 	var argvPtr uintptr

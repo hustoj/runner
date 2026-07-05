@@ -12,7 +12,7 @@ const (
 )
 
 type traceeState struct {
-	inSyscall         bool
+	inSyscall         bool   //nolint:unused // accessed in tracer_linux.go
 	prevSyscall       uint64 //nolint:unused // accessed in tracer_linux.go
 	pendingAttachStop bool
 }

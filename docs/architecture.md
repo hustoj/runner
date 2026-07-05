@@ -116,14 +116,14 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 ## 6. 安全机制:hybrid syscall 过滤与三段式沙箱
 
-当前默认仍是 ptrace-only；当 `SyscallBackend` 配置为 `hybrid` 时，runner 会在 Linux 子进程完成沙箱和 `ptrace(TRACEME)` 后、`execve` 前安装 seccomp-BPF 过滤器。seccomp 负责把普通 runtime syscall 过滤下沉到内核态，ptrace 保留 bootstrap `execve` 一次性语义、多 tracee 生命周期和迁移期审计职责。迁移背景见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。
+当前默认仍是 ptrace-only；当 `SyscallBackend` 配置为 `hybrid` 时，runner 会在 Linux 子进程完成沙箱和 `ptrace(TRACEME)` 后、`execve` 前安装 seccomp-BPF 过滤器。seccomp 负责把普通 runtime syscall 过滤下沉到内核态，ptrace 保留 bootstrap `execve` 一次性语义、多 tracee 生命周期和按名单审计职责。Phase 2 已新增 `SyscallPolicy` 归一与编译层，把 legacy 白名单和结构化 `Allow` / `Deny` / `Trace` / `Audit` 合成同一份 effective policy，再编译成 ptrace 与 seccomp 各自消费的后端输入。迁移背景见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。
 
 ### 6.1 syscall 白名单
 
 - [`TracerDetect`](../runner/tracer.go) 为每个 tracee 维护 enter/exit 相位;只在 **syscall-enter stop** 查白名单。
-- [`CallPolicy`](../runner/sec.go) 是两层白名单:`allowedCalls`(永久)+ `oneTimeCalls`(一次性,默认只有 `execve`,启动期被预先消费)。
-- ptrace 选项(`process_linux.go`):默认是 `PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL | TRACE{CLONE,FORK,VFORK}`；hybrid 模式额外打开 `PTRACE_O_TRACESECCOMP`。`TRACESYSGOOD` 让 syscall-stop 用 `SIGTRAP|0x80`,与真实 `SIGTRAP` 区分。
-- hybrid 模式下,`AllowedCalls + AdditionCalls` 会生成 seccomp `ALLOW` 规则；`OneTimeCalls` 生成 `SECCOMP_RET_TRACE` 规则,由 ptrace 在启动边界审批。普通禁止 syscall 会在内核态执行前被杀死,不会再依赖 ptrace enter/exit 相位。
+- [`EffectiveSyscallPolicy`](../runner/syscall_policy.go) 先把 legacy `AllowedCalls` / `AdditionCalls` / `OneTimeCalls` 和结构化 `SyscallPolicy` 归一；`compileSyscallPolicy()` 再生成 ptrace 与 seccomp 的后端输入；[`CallPolicy`](../runner/sec.go) 只消费 ptrace 需要的具名 `callPolicySpec`。
+- ptrace 选项(`process_linux.go`):默认是 `PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL | TRACE{CLONE,FORK,VFORK}`；hybrid 模式额外打开 `PTRACE_O_TRACESECCOMP`。ptrace-only 用 `PTRACE_SYSCALL` 获得 syscall enter/exit stop；hybrid 为性能和简单性使用 `PTRACE_CONT`，只接收 ptrace event、信号停靠和退出事件。
+- hybrid 模式下，effective `Allow` 会生成 seccomp `ALLOW` 规则；`Deny` 先从 allow 结果里做减法，因此可覆盖默认或语言 fixture 继承来的 syscall；`OneTimeCalls + Trace + Audit` 生成 `SECCOMP_RET_TRACE` 规则，由 ptrace 审批或审计。普通禁止 syscall 会在内核态执行前被杀死，不再依赖 ptrace enter/exit 相位。
 
 ### 6.2 rlimit 内核兜底层
 
@@ -146,6 +146,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 - **CPU 是总 CPU 时间**:多线程并行时该值可能明显大于 wall-clock。
 - **Memory 双来源**:[`refreshPeakMemoryFromProc`](../runner/exec.go) 遍历 active pid 读 `/proc/status` 的 `VmHWM`,按 Tgid 去重取每组峰值再求和;[`process.Memory`](../runner/process.go) 来自 `wait4` 的 `ru_maxrss`,按 thread group 聚合并扣除 bootstrap 基线偏移。两者取 `max` 作为 `PeakMemory`。
+- **hybrid event-only 采样粒度较粗**:hybrid 不再在每个普通 syscall enter/exit stop 醒来，因此 `checkLimit` 只会在 ptrace event、信号停靠、退出等路径运行；最终判定仍依赖 `RLIMIT_CPU` / `alarm` / cgroup v2 memory 状态兜底。
 
 完整字段语义、双层关系与事件归类见 [runner/resource-limits.md](runner/resource-limits.md)。
 
@@ -157,12 +158,13 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 - **arm64**([syscalls_arm64.go](../sec/syscalls_arm64.go)):直接用 `unix.SYS_*` 常量 map,末尾几个 6.x 新号因 `x/sys` 尚未定义而硬编码。
 - 其它平台([stub_other.go](../sec/stub_other.go)):返回 "only available on linux/amd64 or linux/arm64"。
 
-策略语义在 [`runner/sec.go`](../runner/sec.go) 的 `CallPolicy` 实现(**纯白名单模型,无黑名单**):
+策略语义先在 [`runner/syscall_policy.go`](../runner/syscall_policy.go) 归一，再交给 [`runner/sec.go`](../runner/sec.go) 的 `CallPolicy` 或 [`runner/seccomp_linux.go`](../runner/seccomp_linux.go) 的 seccomp filter 生成器:
 
 - 默认 `AllowedCalls`([config.go:42](../runner/config.go))非常保守:`read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn`。
 - 默认 `OneTimeCalls`:仅 `execve`。
 - Java 等运行时通过 `AdditionCalls` 追加约 40 个,示例见 [`tests/java/case.json`](../tests/java/case.json)。
 - amd64 平台默认追加 `arch_prctl/readlink/access`,arm64 不追加。
+- `SyscallPolicy.Allow` 追加 runtime allow；`SyscallPolicy.Deny` 覆盖 allow 结果；`SyscallPolicy.Trace` 在 hybrid 下转成 seccomp trace 规则；`SyscallPolicy.Audit` 同样转成 trace 规则，并额外输出 audit 日志。`Deny` 不能和 `OneTimeCalls` / `Trace` / `Audit` 重叠；hybrid 启动协议保留 `write` / `close` / `exit` / `exit_group`，这些 syscall 不能放入 `Deny` / `Trace` / `Audit` / `OneTimeCalls`。
 
 可读的 syscall 清单与 Java 案例见 [runner/syscalls.md](runner/syscalls.md)。
 
@@ -175,7 +177,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 - [sec/syscalls_test.go](../sec/syscalls_test.go):交叉校验表与内核常量、新内核 syscall 覆盖、架构差异。
 - [sandbox_behavior_linux_test.go](../runner/sandbox_behavior_linux_test.go):行为级集成测试,通过 `runProcess()` 启动真实子进程读 `/proc/<pid>/status` 断言 NoNewPrivs、UID/GID 切换、mount namespace、chroot(部分用例需 root)。
 
-### 9.2 集成测试(`tests/`,20 个 case)
+### 9.2 集成测试(`tests/`,23 个 case)
 
 每个 case = `case.json` + 源码(`.c`/`.java`)+ `makefile`(`gcc -static → ../../bin/test → clean`)。`make testall`([Makefile](../Makefile))依次进入每个目录执行。分类:
 
@@ -184,7 +186,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 | 正常 | `general` |
 | 资源限制 | `tle` `tle2` `mle` `mle2` `mle21` `mle3` `ole` `prlimit-ole` `stack` |
 | 运行时异常 | `segmentfault` `sigtrap` `zero` |
-| 安全/多进程 | `clone-syscall-phase` `fork` `socket` `thread` |
+| 安全/多进程 | `clone-syscall-phase` `clone-syscall-phase-hybrid` `fork` `socket` `syscall-policy-deny-hybrid` `syscall-policy-trace-audit-hybrid` `thread` |
 | Java | `java` `java-tle` `java-mle` |
 
 `make testall` 需要 C/C++ 工具链(静态链接)、GNU Make,可选 Java(`tests/java*`)。完整前提与平台支持矩阵见 [README.md](../README.md)。

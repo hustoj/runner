@@ -1,6 +1,6 @@
 # seccomp-bpf 迁移草案
 
-> 当前代码已落地 Phase 1 的最小 hybrid 版本：默认仍是 `ptrace`，显式配置 `SyscallBackend: "hybrid"` 时会在 Linux child 中安装 seccomp-BPF 过滤器；普通 runtime allowlist 走 `ALLOW`，`OneTimeCalls` 走 `SECCOMP_RET_TRACE` 交给 ptrace 做启动边界判断。纯 seccomp 仍是后续方向。
+> 当前代码已落地 Phase 1 的 hybrid 版本，并推进了 Phase 2 的兼容式策略归一层：默认仍是 `ptrace`，显式配置 `SyscallBackend: "hybrid"` 时会在 Linux child 中安装 seccomp-BPF 过滤器；普通 runtime allowlist 走 `ALLOW`，`OneTimeCalls` 走 `SECCOMP_RET_TRACE` 交给 ptrace 做启动边界判断。`SyscallPolicy` 已提供 `Allow` / `Deny` / `Trace` / `Audit` 四个显式桶，但旧的 `AllowedCalls` / `AdditionCalls` / `OneTimeCalls` 仍保持兼容。纯 seccomp 仍是后续方向。
 
 ## 目标
 
@@ -12,9 +12,9 @@
 
 当前 runner 的 syscall 控制面有三个关键特点：
 
-1. 白名单来自 [runner/config.go](../runner/config.go) 的 `AllowedCalls` 和 `AdditionCalls`。
+1. 兼容白名单来自 [runner/config.go](../runner/config.go) 的 `AllowedCalls` 和 `AdditionCalls`，结构化新增规则来自 `SyscallPolicy.Allow` / `Deny` / `Trace` / `Audit`。
 2. 一次性 syscall 来自 [runner/config.go](../runner/config.go) 的 `OneTimeCalls`，默认包含 `execve`。
-3. 运行时的最终判定发生在 [runner/tracer_linux.go](../runner/tracer_linux.go) 的 ptrace loop 中。
+3. ptrace-only 模式的最终判定仍发生在 [runner/tracer_linux.go](../runner/tracer_linux.go) 的 ptrace loop 中；hybrid 模式下普通禁止 syscall 由 seccomp 在执行前拒绝，ptrace 只处理 `SECCOMP_RET_TRACE` 事件和生命周期事件。
 
 这个模型的主要问题是：
 
@@ -58,38 +58,52 @@
 3. seccomp 规则负责稳定的 runtime allowlist，例如 `read`、`write`、`mmap`、`brk`、`exit_group` 这类通用 syscall。
 4. ptrace 暂时只处理两类场景：
    - bootstrap `execve` 的边界语义：BPF 对 `OneTimeCalls` 返回 `SECCOMP_RET_TRACE`，parent 在 `PTRACE_EVENT_SECCOMP` 上确认这次启动期 `execve`
-   - 迁移期的审计和对照验证
+   - 迁移期按 `Trace` / `Audit` 名单做审计和抽样对照
 
 这样做的好处是：
 
 1. 大部分危险 syscall 在内核态直接被拒绝。
 2. 可以逐步收缩 ptrace 的职责，而不是一次性替换所有行为。
-3. 现有测试可以复用，并且能做 ptrace/seccomp 双轨对照。
+3. 现有测试可以复用，并且能做 ptrace-only 与 hybrid 的结果对照。
+
+当前 hybrid 明确选择 event-only resume：tracee 用 `PTRACE_CONT` 继续运行，ptrace 只接收 fork/clone/vfork 生命周期事件、`PTRACE_EVENT_SECCOMP`、信号停靠和退出事件；它不再通过 `PTRACE_SYSCALL` 观察普通 syscall 的 enter/exit stop。因此，“迁移期对照”不是全量 ptrace 复核 seccomp `ALLOW` 调用，而是通过 `Trace` / `Audit` 把需要观测的 syscall 转成 seccomp trace event。
 
 ### Phase 2: 配置模型重构
 
 目标：把当前配置从“ptrace 时代的 syscall 名单”重构成“seccomp 时代的策略模型”。
 
-建议新增一个显式策略层，例如：
+当前实现已经新增一个兼容式显式策略层：
 
 ```json
 {
   "SyscallPolicy": {
-    "DefaultAction": "errno",
-    "Allowed": ["read", "write", "mmap", "brk"],
-    "Denied": ["socket", "connect", "bpf", "ptrace"],
-    "Trap": ["clone", "fork", "vfork", "execve"]
+    "Allow": ["read", "write", "mmap", "brk"],
+    "Deny": ["socket", "connect", "bpf", "ptrace"],
+    "Trace": ["clone", "fork", "vfork"],
+    "Audit": ["getpid"]
   }
 }
 ```
 
 这里的含义是：
 
-1. `Allowed` 直接转成 seccomp allowlist。
-2. `Denied` 直接返回 `EPERM` 或 `KILL_PROCESS`。
-3. `Trap` 在 hybrid 模式下先交给 ptrace 或 `SECCOMP_RET_TRACE` 处理。
+1. `Allow` 进入 runtime allowlist；hybrid 模式下生成 seccomp `ALLOW` 规则。
+2. `Trace` 在 ptrace-only 模式下作为允许规则通过 ptrace；hybrid 模式下生成 `SECCOMP_RET_TRACE` 规则，交给 ptrace 处理事件。
+3. `Audit` 的放行方式和 `Trace` 一样，但会额外输出独立 audit 日志，用于迁移期按名单抽样观测。
+4. `Deny` 会从 legacy `AllowedCalls + AdditionCalls` 和 `SyscallPolicy.Allow` 的合并结果中删除对应 syscall；在 hybrid 模式下落到 seccomp 默认 `KILL_PROCESS`，在 ptrace-only 模式下落到默认拒绝。
+5. `OneTimeCalls` 仍保留启动边界语义，默认 `execve`；`Deny` 不能和 `OneTimeCalls` / `Trace` / `Audit` 重叠。
+6. hybrid 下 `write` / `close` / `exit` / `exit_group` 属于 runner 启动协议保留 syscall。它们可以被 runtime allow，但不能放入 `Deny` / `Trace` / `Audit` / `OneTimeCalls`，否则 child 在 seccomp 安装后可能无法回报启动失败或正常退出。
+7. `AllowedCalls` 和 `AdditionCalls` 作为 legacy runtime allowlist 继续兼容，并参与同一份 effective policy。
 
-这一步的关键收益是把“一次性调用”“需要审计的调用”“可直接拒绝的调用”分层，而不是全部混在一个白名单里。
+#### Breaking 行为：syscall ownership fail-loud
+
+当前实现有意收紧 syscall policy 的 ownership 契约：同一个 syscall 不能同时属于 `OneTimeCalls`、runtime allowlist（`AllowedCalls` / `AdditionCalls` / `SyscallPolicy.Allow`）、`SyscallPolicy.Trace`、`SyscallPolicy.Audit`。`SyscallPolicy.Deny` 只允许覆盖 runtime allowlist，不能和 `OneTimeCalls` / `Trace` / `Audit` 重叠。
+
+这个校验在默认 `ptrace` 路径同样生效，不只影响 `hybrid`。因此，旧版本中曾经合法的 `OneTimeCalls` 与 `AllowedCalls` / `AdditionCalls` 重叠配置，升级后会在配置加载阶段失败；旧版 ptrace 的 allow 优先语义会让这种重叠退化为永久 allow，当前版本改为明确拒绝这种模糊配置。
+
+迁移规则：如果某个 syscall 同时出现在 `OneTimeCalls` 和 runtime allowlist，需要按真实意图二选一；需要永久允许时从 `OneTimeCalls` 删除，只允许启动边界或一次性调用时从 `AllowedCalls` / `AdditionCalls` / `SyscallPolicy.Allow` 删除。
+
+这一步的关键收益是把“一次性调用”“永久允许调用”“需要审计的调用”“显式拒绝的调用”分层，而不是全部混在一个白名单里。当前实现采用明确优先级：先合并 allow，再用 deny 做减法；allow/trace/audit/one-time 保持互斥。代码上先得到 `EffectiveSyscallPolicy`，再编译成后端输入：ptrace 消费 `callPolicySpec`，seccomp 消费最终 `ALLOW`/`TRACE` 两组 syscall 名称，调用点不再重复拼装四个桶。
 
 ### Phase 3: 启动模型重构
 
@@ -116,8 +130,9 @@
 规则生成逻辑建议分三层：
 
 1. 名称解析层：把 syscall 名称映射到当前架构的 syscall 编号。
-2. 策略归一层：把 `AllowedCalls`、语言差异和平台差异整理成统一策略。
-3. 后端生成层：输出 seccomp filter。
+2. 策略归一层：把 legacy `AllowedCalls` / `AdditionCalls`、结构化 `SyscallPolicy`、语言差异和平台差异整理成统一 `EffectiveSyscallPolicy`。
+3. 策略编译层：把 effective policy 编译成 ptrace 与 seccomp 各自消费的后端输入。
+4. 后端生成层：输出 seccomp filter。
 
 这三层分开后，未来如果切换架构或更新 syscall 表，不需要直接动运行时逻辑。
 
@@ -162,14 +177,14 @@
 3. 正常题解的基础 syscall 仍然放行
 4. Java/C++ 等多语言启动路径没有被误杀
 
-### 3. 对照测试
+### 3. 结果对照测试
 
 在 hybrid 阶段，同一组样例分别跑：
 
 1. ptrace only
 2. seccomp + ptrace
 
-输出应对齐到同一份判题结果和关键日志指标。
+输出应对齐到同一份判题结果和关键日志指标。hybrid event-only 模式不会生成普通 syscall enter/exit 日志；需要迁移期观测的 syscall 应显式放入 `Trace` 或 `Audit`。当前集成覆盖包括 `tests/syscall-policy-deny-hybrid` 的 Deny 覆盖继承 allow，以及 `tests/syscall-policy-trace-audit-hybrid` 的 Trace/Audit 端到端审计日志。
 
 ## 建议的首批实现范围
 

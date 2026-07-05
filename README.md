@@ -12,6 +12,7 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
 | Integration tests (`make testall`) | ✅ | validate on target host | ❌ |
 
 - **Runtime execution is implemented for Linux (amd64 and arm64)**. The ptrace-based tracer and syscall tables are only available on these platforms.
+- **Linux runtime execution requires kernel 5.9 or newer**. Child startup uses `close_range(2)` to close inherited non-stdio file descriptors before sandbox setup and `execve`.
 - **Linux runtime execution now requires cgroup v2 memory delegation**. Runner creates one task cgroup per run and uses `memory.max` / `memory.events` / `memory.peak` as the memory source of truth.
 - macOS is supported for **development tasks, unit tests, compilation, and type-checking only**. Darwin stubs exist solely to enable cross-platform IDE workflows.
 - Full integration coverage (`make testall`) is maintained on Linux/amd64. On Linux/arm64, run the suite on the target host before treating it as a release gate.
@@ -48,6 +49,7 @@ This project is judger runner for [HUSTOJ](https://github.com/hustoj/runner), wr
 - **C/C++ toolchain**: `gcc`, `g++` with static linking support (`libc-dev`, `libstdc++-dev`)
 - **Java** (optional): `javac` and `java` for Java test cases (`tests/java*`)
 - **make**: GNU Make
+- **Linux kernel**: 5.9 or newer for `close_range(2)` during child startup
 - **cgroup v2 memory controller**: runner must be able to create child cgroups under a writable delegated parent (or use `RUNNER_CGROUP_PARENT`)
 
 On Debian/Ubuntu:

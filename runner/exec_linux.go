@@ -25,6 +25,7 @@ const (
 	childStageDupStdin
 	childStageDupStdout
 	childStageDupStderr
+	childStageCloseInheritedFiles
 	childStageSetProcessGroup
 	childStageAwaitCgroupJoin
 	childStageSandboxNamespaces
@@ -71,6 +72,8 @@ func (s childStartupStage) String() string {
 		return "dup stdout"
 	case childStageDupStderr:
 		return "dup stderr"
+	case childStageCloseInheritedFiles:
+		return "close inherited files"
 	case childStageSetProcessGroup:
 		return "set process group"
 	case childStageAwaitCgroupJoin:
@@ -566,6 +569,11 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 	if errno := dupToStandardFD(spec.io.stderr, syscall.Stderr); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStageDupStderr, errno)
 	}
+	closedStartupPipeWriteFD, closeErrno := closeNonStdioFilesExceptStartupPipe(startupPipeWriteFD)
+	startupPipeWriteFD = closedStartupPipeWriteFD
+	if closeErrno != 0 {
+		reportChildStartupFailure(startupPipeWriteFD, childStageCloseInheritedFiles, closeErrno)
+	}
 	if errno := rawSetpgid(0, 0); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStageSetProcessGroup, errno)
 	}
@@ -628,6 +636,34 @@ func dupToStandardFD(sourceFD int, targetFD int) syscall.Errno {
 	}
 	rawClose(sourceFD)
 	return 0
+}
+
+const childStartupReportFD = 3
+
+func closeNonStdioFilesExceptStartupPipe(startupPipeWriteFD int) (int, syscall.Errno) {
+	if startupPipeWriteFD != childStartupReportFD {
+		_, _, errno := syscall.RawSyscall(
+			syscall.SYS_DUP3,
+			uintptr(startupPipeWriteFD),
+			uintptr(childStartupReportFD),
+			uintptr(syscall.O_CLOEXEC),
+		)
+		if errno != 0 {
+			return startupPipeWriteFD, errno
+		}
+		rawClose(startupPipeWriteFD)
+		startupPipeWriteFD = childStartupReportFD
+	}
+
+	if errno := rawCloseRange(childStartupReportFD + 1); errno != 0 {
+		return startupPipeWriteFD, errno
+	}
+	return startupPipeWriteFD, 0
+}
+
+func rawCloseRange(firstFD int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(unix.SYS_CLOSE_RANGE, uintptr(firstFD), ^uintptr(0), 0)
+	return errno
 }
 
 func rawClose(fd int) {

@@ -4,6 +4,7 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -160,6 +161,49 @@ func TestPrepareChildProcessSpecBuildsHybridSeccompFilter(t *testing.T) {
 func TestChildStageSeccompString(t *testing.T) {
 	if got := childStageSeccomp.String(); got != "install seccomp filter" {
 		t.Fatalf("childStageSeccomp.String() = %q", got)
+	}
+}
+
+func TestCloseNonStdioFilesExceptStartupPipe(t *testing.T) {
+	if os.Getenv("TEST_RUNNER_CLOSE_CHILD_FDS") == "1" {
+		startupPipeFDs := [2]int{-1, -1}
+		if err := syscall.Pipe2(startupPipeFDs[:], syscall.O_CLOEXEC); err != nil {
+			os.Exit(2)
+		}
+
+		leakedFD, err := syscall.Open("/dev/null", syscall.O_RDONLY, 0)
+		if err != nil {
+			os.Exit(3)
+		}
+		startupWriteFD, errno := closeNonStdioFilesExceptStartupPipe(startupPipeFDs[1])
+		if errno != 0 {
+			os.Exit(5)
+		}
+
+		var stat syscall.Stat_t
+		if syscall.Fstat(leakedFD, &stat) == nil {
+			os.Exit(6)
+		}
+		flags, _, errno := syscall.RawSyscall(syscall.SYS_FCNTL, uintptr(startupWriteFD), uintptr(syscall.F_GETFD), 0)
+		if errno != 0 {
+			os.Exit(7)
+		}
+		if flags&syscall.FD_CLOEXEC == 0 {
+			os.Exit(8)
+		}
+		os.Exit(0)
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+
+	cmd := exec.Command(self, "-test.run=^TestCloseNonStdioFilesExceptStartupPipe$")
+	cmd.Env = append(os.Environ(), "TEST_RUNNER_CLOSE_CHILD_FDS=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("close child fds subprocess failed: %v\noutput: %s", err, out)
 	}
 }
 

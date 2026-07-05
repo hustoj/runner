@@ -225,7 +225,7 @@ func (task *RunningTask) runProcess() error {
 		return fmt.Errorf("release child cgroup gate: %w", err)
 	}
 	if shouldSyncSeccompTracee(spec.seccomp) {
-		if err := prepareHybridSeccompTracee(pid, spec.seccomp); err != nil {
+		if err := prepareHybridSeccompTracee(pid); err != nil {
 			_ = syscall.Close(startupPipeFDs[0])
 			killChildAfterStartupError(pid)
 			return fmt.Errorf("prepare hybrid seccomp tracee: %w", err)
@@ -421,7 +421,7 @@ func shouldSyncSeccompTracee(spec childSeccompSpec) bool {
 	return spec.enabled && len(spec.traceSyscalls) > 0
 }
 
-func prepareHybridSeccompTracee(pid int, spec childSeccompSpec) error {
+func prepareHybridSeccompTracee(pid int) error {
 	status, err := waitForTraceeStop(pid)
 	if err != nil {
 		return fmt.Errorf("wait ptrace sync stop: %w", err)

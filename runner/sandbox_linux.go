@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-const prSetNoNewPrivs = 38
+const prSetNoNewPrivs = PrSetNoNewPrivs
 
 // SandboxConfig defines the security isolation parameters for child processes.
 // It controls privilege dropping, filesystem isolation, and namespace creation.

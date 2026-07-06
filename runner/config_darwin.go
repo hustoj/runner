@@ -14,3 +14,7 @@ func validateSyscallBackendForPlatform(backend string) error {
 	}
 	return nil
 }
+
+func validateRuntimeSecurityForPlatform(_ *TaskConfig, _ int) error {
+	return nil
+}

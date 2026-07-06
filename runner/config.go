@@ -21,8 +21,9 @@ type TaskConfig struct {
 	MaxProcs      int `default:"16"`  // Max number of processes/threads per task cgroup (Linux cgroup v2 pids.max)
 
 	// Sandbox security settings
-	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
-	RunGID int `default:"-1"` // GID to run as (-1 = no privilege drop)
+	RunUID               int  `default:"-1"`    // UID to run as (-1 = no privilege drop)
+	RunGID               int  `default:"-1"`    // GID to run as (-1 = no privilege drop)
+	AllowPrivilegedChild bool `default:"false"` // Explicitly allow a root child (RunUID/RunGID unset or 0) on Linux
 
 	Command   string   `default:"./main"`
 	Args      []string `default:""` // Explicit arguments; takes precedence over parsing Command
@@ -149,6 +150,10 @@ func (tc *TaskConfig) LogValidationWarnings() {
 	}
 }
 
+func (tc *TaskConfig) validateRuntimeSecurity(euid int) error {
+	return validateRuntimeSecurityForPlatform(tc, euid)
+}
+
 func (tc *TaskConfig) effectiveSyscallBackend() string {
 	if tc.SyscallBackend == "" {
 		return syscallBackendPtrace
@@ -236,6 +241,9 @@ func LoadConfig() (*TaskConfig, error) {
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := cfg.validateRuntimeSecurity(os.Geteuid()); err != nil {
+		return nil, fmt.Errorf("invalid runtime security configuration: %w", err)
 	}
 
 	return cfg, nil

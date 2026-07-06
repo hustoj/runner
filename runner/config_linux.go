@@ -21,3 +21,16 @@ func validateSyscallNames(field string, names []string) error {
 func validateSyscallBackendForPlatform(_ string) error {
 	return nil
 }
+
+func validateRuntimeSecurityForPlatform(config *TaskConfig, euid int) error {
+	if euid != 0 {
+		return nil
+	}
+	if config.RunUID > 0 && config.RunGID > 0 {
+		return nil
+	}
+	if config.AllowPrivilegedChild {
+		return nil
+	}
+	return fmt.Errorf("running as root without dropping to unprivileged RunUID/RunGID requires AllowPrivilegedChild=true")
+}

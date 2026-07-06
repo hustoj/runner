@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
@@ -160,6 +162,29 @@ func TestPrepareChildProcessSpecBuildsHybridSeccompFilter(t *testing.T) {
 func TestChildStageSeccompString(t *testing.T) {
 	if got := childStageSeccomp.String(); got != "install seccomp filter" {
 		t.Fatalf("childStageSeccomp.String() = %q", got)
+	}
+}
+
+func TestChildStageDropSysResourceCapabilityString(t *testing.T) {
+	if got := childStageDropSysResourceCapability.String(); got != "drop CAP_SYS_RESOURCE" {
+		t.Fatalf("childStageDropSysResourceCapability.String() = %q", got)
+	}
+}
+
+func TestClearCapabilityRemovesCapabilityFromAllSets(t *testing.T) {
+	word, mask := capabilityMask(unix.CAP_SYS_RESOURCE)
+	data := [2]unix.CapUserData{}
+	data[word] = unix.CapUserData{
+		Effective:   mask,
+		Permitted:   mask,
+		Inheritable: mask,
+	}
+
+	if !clearCapability(&data, unix.CAP_SYS_RESOURCE) {
+		t.Fatal("clearCapability() changed = false, want true")
+	}
+	if data[word].Effective&mask != 0 || data[word].Permitted&mask != 0 || data[word].Inheritable&mask != 0 {
+		t.Fatalf("CAP_SYS_RESOURCE not fully cleared from %+v", data[word])
 	}
 }
 

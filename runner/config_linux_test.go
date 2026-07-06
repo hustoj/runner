@@ -46,7 +46,7 @@ func TestValidateAcceptsValidSyscallNames(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
-	json := `{"OneTimeCalls":["execve"],"AllowedCalls":["read","write","brk"],"AdditionCalls":["mmap"]}`
+	json := `{"OneTimeCalls":["execve"],"AllowedCalls":["read","write","brk"],"AdditionCalls":["mmap"],"AllowPrivilegedChild":true}`
 	runWithTempCaseJSON(t, json, func() {
 		SetLogger(nil)
 
@@ -64,7 +64,7 @@ func TestValidateAcceptsHybridSyscallBackend(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
-	json := `{"SyscallBackend":"hybrid","NoNewPrivs":true,"OneTimeCalls":["execve"],"AllowedCalls":["read"],"AdditionCalls":["write"]}`
+	json := `{"SyscallBackend":"hybrid","NoNewPrivs":true,"OneTimeCalls":["execve"],"AllowedCalls":["read"],"AdditionCalls":["write"],"AllowPrivilegedChild":true}`
 	runWithTempCaseJSON(t, json, func() {
 		SetLogger(nil)
 
@@ -76,6 +76,51 @@ func TestValidateAcceptsHybridSyscallBackend(t *testing.T) {
 			t.Fatalf("effectiveSyscallBackend() = %q, want %q", got, syscallBackendHybrid)
 		}
 	})
+}
+
+func TestValidateRuntimeSecurityRejectsRootWithoutPrivilegeDropOrOptIn(t *testing.T) {
+	tests := []struct {
+		name   string
+		config TaskConfig
+	}{
+		{name: "unset", config: TaskConfig{RunUID: -1, RunGID: -1}},
+		{name: "zero uid/gid keeps root", config: TaskConfig{RunUID: 0, RunGID: 0}},
+		{name: "zero uid", config: TaskConfig{RunUID: 0, RunGID: 1000}},
+		{name: "zero gid", config: TaskConfig{RunUID: 1000, RunGID: 0}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.validateRuntimeSecurity(0)
+			if err == nil {
+				t.Fatal("validateRuntimeSecurity() error = nil, want privileged child rejection")
+			}
+			if !strings.Contains(err.Error(), "AllowPrivilegedChild=true") {
+				t.Fatalf("validateRuntimeSecurity() error = %q, want explicit opt-in guidance", err)
+			}
+		})
+	}
+}
+
+func TestValidateRuntimeSecurityAcceptsNonRootOrPrivilegeDropOrOptIn(t *testing.T) {
+	tests := []struct {
+		name   string
+		config TaskConfig
+		euid   int
+	}{
+		{name: "non-root", config: TaskConfig{RunUID: -1, RunGID: -1}, euid: 1000},
+		{name: "credential drop", config: TaskConfig{RunUID: 1000, RunGID: 1000}, euid: 0},
+		{name: "explicit opt-in", config: TaskConfig{RunUID: -1, RunGID: -1, AllowPrivilegedChild: true}, euid: 0},
+		{name: "zero uid/gid with explicit opt-in", config: TaskConfig{RunUID: 0, RunGID: 0, AllowPrivilegedChild: true}, euid: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.config.validateRuntimeSecurity(tt.euid); err != nil {
+				t.Fatalf("validateRuntimeSecurity() error = %v", err)
+			}
+		})
+	}
 }
 
 func TestValidateRejectsHybridDenyOfStartupProtocolCalls(t *testing.T) {

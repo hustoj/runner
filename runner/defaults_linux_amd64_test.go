@@ -8,7 +8,7 @@ func TestLoadConfigAddsAMD64DefaultCalls(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
-	runWithTempCaseJSON(t, `{}`, func() {
+	runWithTempCaseJSON(t, `{"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 
 		cfg, err := LoadConfig()

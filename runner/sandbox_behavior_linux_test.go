@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestRunProcessSetsNoNewPrivsBeforeTraceLoop(t *testing.T) {
@@ -104,6 +106,28 @@ func TestRunProcessPropagatesSandboxPermissionFailures(t *testing.T) {
 			_, _, err := startSandboxedTask(t, cfg)
 			assertSandboxStartupError(t, err, "setup namespaces", syscall.EPERM)
 		})
+	})
+}
+
+func TestRunProcessDropsSysResourceCapabilityBeforeTraceLoop(t *testing.T) {
+	requireSandboxRoot(t)
+
+	runInSandboxWorkspace(t, func(_ string) {
+		task, cleanup, err := startSandboxedTask(t, sandboxRunProcessConfig("/bin/true"))
+		if err != nil {
+			t.Fatalf("runProcess() error = %v", err)
+		}
+		defer cleanup()
+
+		status, err := readProcStatusFields(task.process.Pid, "CapEff", "CapPrm", "CapInh", "CapBnd")
+		if err != nil {
+			t.Fatalf("readProcStatusFields(capabilities) error = %v", err)
+		}
+		for _, field := range []string{"CapEff", "CapPrm", "CapInh", "CapBnd"} {
+			if capabilityStatusHas(status[field], unix.CAP_SYS_RESOURCE) {
+				t.Fatalf("%s = %v still contains CAP_SYS_RESOURCE", field, status[field])
+			}
+		}
 	})
 }
 
@@ -336,6 +360,20 @@ func allFieldsEqual(values []string, want int) bool {
 	for _, value := range values {
 		got, err := strconv.Atoi(value)
 		if err != nil || got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func capabilityStatusHas(values []string, capability int) bool {
+	if len(values) == 0 || capability < 0 || capability >= 64 {
+		return false
+	}
+	mask := uint64(1) << uint(capability)
+	for _, value := range values {
+		bits, err := strconv.ParseUint(value, 16, 64)
+		if err != nil || bits&mask == 0 {
 			return false
 		}
 	}

@@ -29,6 +29,9 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 }
 
 func (task *RunningTask) Run() error {
+	if err := task.setting.validateRuntimeSecurity(os.Geteuid()); err != nil {
+		return err
+	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := task.runProcess(); err != nil {

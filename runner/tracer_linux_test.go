@@ -123,6 +123,72 @@ func TestCheckSeccompTraceConsumesPolicyAtEventStop(t *testing.T) {
 	assert.False(t, tracer.callPolicy.CheckID(uint64(syscall.SYS_GETPID)))
 }
 
+func TestCheckSyscallAllowsPrlimit64Query(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	policy, err := makeCallPolicy(callPolicySpec{AllowedCalls: []string{"prlimit64"}})
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_PRLIMIT64))
+		setTestSyscallArgument(regs, 2, 0)
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckOK, tracer.checkSyscall(100))
+}
+
+func TestCheckSyscallRejectsPrlimit64Set(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	policy, err := makeCallPolicy(callPolicySpec{AllowedCalls: []string{"prlimit64"}})
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_PRLIMIT64))
+		setTestSyscallArgument(regs, 2, 0x1234)
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckViolation, tracer.checkSyscall(100))
+}
+
+func TestCheckSeccompTraceRejectsPrlimit64Set(t *testing.T) {
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+
+	policy, err := makeCallPolicy(callPolicySpec{AllowedCalls: []string{"prlimit64"}})
+	assert.NoError(t, err)
+	tracer.setCallPolicy(policy)
+
+	original := ptraceGetRegs
+	ptraceGetRegs = func(pid int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, 100, pid)
+		setTestSyscallNumber(regs, uint64(syscall.SYS_PRLIMIT64))
+		setTestSyscallArgument(regs, 2, 0x1234)
+		return nil
+	}
+	t.Cleanup(func() {
+		ptraceGetRegs = original
+	})
+
+	assert.Equal(t, syscallCheckViolation, tracer.checkSeccompTrace(100))
+}
+
 func TestCheckSyscallLogsAuditCall(t *testing.T) {
 	observedLogs := useObservedLogger(t)
 	tracer := &TracerDetect{}

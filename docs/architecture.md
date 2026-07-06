@@ -71,7 +71,9 @@ Darwin 占位桩统一返回同一条消息(见 [utils_darwin.go](../runner/util
 
 `cmd/runner` 是生产评测主入口,33 行 main 串起 `LoadConfig → InitLogger → RunningTask.Init → Run → GetResult`,把 [`Result`](../runner/result.go) 序列化为 JSON。
 
-`cmd/compiler` 采用 **bootstrap 自举模式**:父进程通过 `os.StartProcess` 重新执行自身二进制并 `Setpgid`,子进程检测环境变量 `RUNNER_COMPILER_BOOTSTRAP=1` 后,在 [compiler_linux.go](../cmd/compiler/compiler_linux.go) 里 `setrlimits` → `setitimer` → IO 重定向 → `syscall.Exec`,避免 Go runtime 在 fork 后的复杂性。编译器的 rlimit(NPROC=32 / NOFILE=64 / CORE=0)与 runner(NPROC=16 / NOFILE=16 / CORE=0)不同。
+`cmd/compiler` 采用 **bootstrap 自举模式**:父进程读取宿主侧 `compile.json` 后,把已解析配置序列化到 `RUNNER_COMPILER_BOOTSTRAP_CONFIG`,再通过 `os.StartProcess` 重新执行自身二进制并 `Setpgid`。子进程检测环境变量 `RUNNER_COMPILER_BOOTSTRAP=1` 后,不再二次读取 `compile.json`,而是从环境变量恢复配置,在 [compiler_linux.go](../cmd/compiler/compiler_linux.go) 里 `unshare namespaces` → `chroot` → `chdir` → `prctl(PR_SET_NO_NEW_PRIVS)` → `setgroups/setgid/setuid` → `setrlimits` → IO 重定向 → `syscall.Exec` 最终编译器,避免把 compiler 自身和配置文件复制进 jail。编译器的 rlimit(NPROC=32 / NOFILE=64 / CORE=0)与 runner(NPROC=16 / NOFILE=16 / CORE=0)不同。
+
+编译器 sandbox 隔离由 bootstrap 子进程在 exec 编译器前自行完成:namespace(`CLONE_NEWNS/IPC/UTS/NET`)、chroot、WorkDir、`NoNewPrivs`、credential drop。配置 `ChrootDir` 且 `WorkDir` 为空时默认进入 chroot 内 `/`;非空 `WorkDir` 必须是绝对路径。**chroot 契约**:jail 内不需要包含 compiler 二进制或 `compile.json`,但必须包含最终编译命令所需的源码、`gcc/g++/fpc/javac`、动态链接器、标准库/头文件以及必要设备文件。`compile.json` 中通过 `RunUID`/`RunGID`/`ChrootDir`/`WorkDir`/`NoNewPrivs`/`UseNetNS` 等字段配置,默认全部关闭以保持向后兼容。Docker 镜像([docker/compiler/Dockerfile](../docker/compiler/Dockerfile))预创建了 `judger` 用户(UID=1536),生产环境应将 `RunUID`/`RunGID` 设为该用户以降权运行 gcc。
 
 ## 5. 执行主流程
 

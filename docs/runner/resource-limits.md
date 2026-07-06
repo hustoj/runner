@@ -112,6 +112,7 @@ Linux 运行期现在分成两类：
   - `RLIMIT_FSIZE = Output`
 - `SIGXFSZ` 会被映射为 `OUTPUT_LIMIT`
 - `prlimit64` 只允许查询，拒绝 SET；root 子进程还会在 exec 前丢弃 `CAP_SYS_RESOURCE`，避免抬高 hard limit 绕过 `RLIMIT_FSIZE`
+- OpenJDK 21 默认可能用 `prlimit64` 提升 `RLIMIT_NOFILE` 的 soft limit；Java 命令应使用 `-XX:-MaxFDLimit` 禁用该行为，而不是放宽 runner 的 `prlimit64` SET 策略
 
 ### Stack
 

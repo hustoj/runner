@@ -129,7 +129,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 ### 6.2 rlimit 内核兜底层
 
-子进程在 exec 前设置一系列 rlimit(见 [第 5.1 节](#51-子进程内部固定执行顺序)与 [resource-limits.md](runner/resource-limits.md))。`prlimit64` 保留在默认白名单里([config.go:42](../runner/config.go))是为了兼容运行时查询 limits；runner 会拒绝 `new_rlim != NULL` 的 SET 操作，hybrid 模式也会把该调用转成 `SECCOMP_RET_TRACE` 后交给 ptrace 做参数检查。
+子进程在 exec 前设置一系列 rlimit(见 [第 5.1 节](#51-子进程内部固定执行顺序)与 [resource-limits.md](runner/resource-limits.md))。`prlimit64` 保留在默认白名单里([config.go:42](../runner/config.go))是为了兼容运行时查询 limits；runner 会拒绝 `new_rlim != NULL` 的 SET 操作，hybrid 模式也会把该调用转成 `SECCOMP_RET_TRACE` 后交给 ptrace 做参数检查。OpenJDK 21 默认提升 `RLIMIT_NOFILE` soft limit 的行为由 Java 命令参数 `-XX:-MaxFDLimit` 关闭，不通过放宽 runner 的 `prlimit64` SET 策略兼容。
 
 ### 6.3 namespace / chroot / 降权
 

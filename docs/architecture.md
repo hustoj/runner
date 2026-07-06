@@ -129,11 +129,11 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 ### 6.2 rlimit 内核兜底层
 
-子进程在 exec 前设置一系列 rlimit(见 [第 5.1 节](#51-子进程内部固定执行顺序)与 [resource-limits.md](runner/resource-limits.md))。所有 rlimit 的 `Cur == Max`,因为 `prlimit64` 在默认白名单里([config.go:42](../runner/config.go)),留 gap 会被用户程序自行放宽。
+子进程在 exec 前设置一系列 rlimit(见 [第 5.1 节](#51-子进程内部固定执行顺序)与 [resource-limits.md](runner/resource-limits.md))。`prlimit64` 保留在默认白名单里([config.go:42](../runner/config.go))是为了兼容运行时查询 limits；runner 会拒绝 `new_rlim != NULL` 的 SET 操作，hybrid 模式也会把该调用转成 `SECCOMP_RET_TRACE` 后交给 ptrace 做参数检查。
 
 ### 6.3 namespace / chroot / 降权
 
-[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
+[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。Linux 上 root 启动且未配置 `RunUID`/`RunGID` 时默认 fail-closed；测试或兼容场景必须显式设置 `AllowPrivilegedChild: true` 才能保留 root 子进程。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
 
 ## 7. 资源判杰契约
 
@@ -162,7 +162,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 策略语义先在 [`runner/syscall_policy.go`](../runner/syscall_policy.go) 归一，再交给 [`runner/sec.go`](../runner/sec.go) 的 `CallPolicy` 或 [`runner/seccomp_linux.go`](../runner/seccomp_linux.go) 的 seccomp filter 生成器:
 
-- 默认 `AllowedCalls`([config.go:42](../runner/config.go))非常保守:`read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn`。
+- 默认 `AllowedCalls`([config.go:42](../runner/config.go))非常保守:`read,write,brk,fstat,uname,mmap,exit_group,exit,readlinkat,faccessat,mprotect,set_tid_address,set_robust_list,rseq,prlimit64,getrandom,rt_sigreturn`；其中 `prlimit64` 是参数过滤调用，仅允许查询，拒绝 SET。
 - 默认 `OneTimeCalls`:仅 `execve`。
 - Java 等运行时通过 `AdditionCalls` 追加约 40 个,示例见 [`tests/java/case.json`](../tests/java/case.json)。
 - amd64 平台默认追加 `arch_prctl/readlink/access`,arm64 不追加。

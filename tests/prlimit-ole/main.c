@@ -21,8 +21,8 @@ int main(void)
         return 2;
     }
 
-    raised.rlim_cur = limit.rlim_max;
-    raised.rlim_max = limit.rlim_max;
+    raised.rlim_cur = RLIM_INFINITY;
+    raised.rlim_max = RLIM_INFINITY;
     if (prlimit(0, RLIMIT_FSIZE, &raised, NULL) != 0) {
         perror("prlimit set");
         return 3;

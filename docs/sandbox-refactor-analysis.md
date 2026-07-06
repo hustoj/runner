@@ -250,11 +250,9 @@ UseNetNS: false
    - 参见 [`seccomp-bpf-migration.md`](seccomp-bpf-migration.md)
    - 建议先在 C/C++ 路径上实现 hybrid 模式
 
-5. **🔧 补充 capability drop**
-   ```go
-   // 在 dropPrivileges 前清空所有 capability
-   syscall.Prctl(PR_CAPBSET_DROP, ...)
-   ```
+5. **✅ 补充关键 capability drop**
+   - child 在降权前清理 `CAP_SYS_RESOURCE` 的 effective/permitted/inheritable 位，并在需要时执行 `PR_CAPBSET_DROP`
+   - 目标是防止 root 子进程通过 `prlimit64` 抬高 hard rlimit；更大范围的 capability 收敛可按后续威胁模型继续推进
 
 6. **🏗️ 重构到 exec.Cmd**
    - 彻底解决 Go raw fork 问题

@@ -10,7 +10,9 @@
 > `SyscallPolicy.Audit`, use `SECCOMP_RET_TRACE`, so ptrace remains the startup
 > boundary and named audit path instead of permanently allowing one-time calls.
 > Hybrid uses event-only ptrace resume for performance, so ordinary seccomp
-> `ALLOW` calls do not produce ptrace syscall enter/exit stops.
+> `ALLOW` calls do not produce ptrace syscall enter/exit stops. Syscalls that
+> require argument filtering, currently `prlimit64`, are compiled as seccomp
+> `TRACE` even when they come from the runtime allowlist.
 
 ## Default allowed syscalls (runtime-supported Linux platforms)
 
@@ -23,6 +25,9 @@ readlinkat, faccessat,
 mprotect, set_tid_address, set_robust_list,
 rseq, prlimit64, getrandom, rt_sigreturn
 ```
+
+`prlimit64` is query-only: calls with `new_rlim == NULL` are allowed, while
+SET operations (`new_rlim != NULL`) are rejected before execution.
 
 ### One-time calls (default)
 

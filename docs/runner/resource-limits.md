@@ -111,6 +111,7 @@ Linux 运行期现在分成两类：
 - 内核兜底：
   - `RLIMIT_FSIZE = Output`
 - `SIGXFSZ` 会被映射为 `OUTPUT_LIMIT`
+- `prlimit64` 只允许查询，拒绝 SET；root 子进程还会在 exec 前丢弃 `CAP_SYS_RESOURCE`，避免抬高 hard limit 绕过 `RLIMIT_FSIZE`
 
 ### Stack
 
@@ -123,6 +124,8 @@ Linux 运行期现在分成两类：
 
 Linux runtime 需要：
 
+- 生产部署应配置 `RunUID` / `RunGID` 做特权降级；Linux 上 root 启动且未降权时会默认拒绝加载配置，除非显式设置 `AllowPrivilegedChild: true`
+- runner 会额外丢弃 `CAP_SYS_RESOURCE`，但这不是完整的 root 子进程隔离策略
 - cgroup v2 挂载点（默认 `/sys/fs/cgroup`）
 - `memory` 与 `pids` controller 已启用
 - 一个可写、已委派的父 cgroup，用于创建每次运行的 task cgroup

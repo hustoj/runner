@@ -1,8 +1,9 @@
 {
-  "Name": "prlimit64 should not widen output limit",
+  "AllowPrivilegedChild": true,
+  "Name": "prlimit64 set should be denied",
   "verbose": true,
   "CPU": 1,
   "Memory": 32,
   "Output": 1,
-  "Result": 9
+  "Result": 10
 }

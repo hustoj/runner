@@ -55,7 +55,7 @@ func BuildMinimalEnv(dropKeys ...string) []string {
 func CloseNonStdioFiles() error {
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
-		return err
+		return closeNonStdioFilesByLimit()
 	}
 	for _, entry := range entries {
 		fd, err := strconv.Atoi(entry.Name())
@@ -63,6 +63,23 @@ func CloseNonStdioFiles() error {
 			continue
 		}
 		if err := syscall.Close(fd); err != nil && err != syscall.EBADF {
+			return err
+		}
+	}
+	return nil
+}
+
+func closeNonStdioFilesByLimit() error {
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		return err
+	}
+	return closeNonStdioFilesUpTo(limit.Cur)
+}
+
+func closeNonStdioFilesUpTo(maxFD uint64) error {
+	for fd := uint64(3); fd < maxFD; fd++ {
+		if err := syscall.Close(int(fd)); err != nil && err != syscall.EBADF {
 			return err
 		}
 	}

@@ -88,12 +88,27 @@ func closeNonStdioFilesUpTo(maxFD uint64) error {
 
 // StartBootstrapChild launches a new instance of the current binary with a bootstrap marker.
 func StartBootstrapChild(markerKey string) (int, error) {
+	return StartBootstrapChildWithEnv(markerKey, nil)
+}
+
+// StartBootstrapChildWithEnv launches a new instance of the current binary with
+// a bootstrap marker plus explicit extra environment entries. Sandbox setup is
+// intentionally left to the bootstrap child so callers can read host-side config
+// before entering chroot or dropping privileges.
+func StartBootstrapChildWithEnv(markerKey string, extraEnv []string) (int, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return 0, err
 	}
 
-	env := append(BuildMinimalEnv(markerKey), markerKey+"=1")
+	dropKeys := []string{markerKey}
+	for _, entry := range extraEnv {
+		key := strings.SplitN(entry, "=", 2)[0]
+		dropKeys = append(dropKeys, key)
+	}
+
+	env := append(BuildMinimalEnv(dropKeys...), markerKey+"=1")
+	env = append(env, extraEnv...)
 	proc, err := os.StartProcess(self, []string{self}, &os.ProcAttr{
 		Env: env,
 		Files: []*os.File{

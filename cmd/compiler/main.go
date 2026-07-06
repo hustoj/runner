@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 )
 
 type RunResult struct {
@@ -11,8 +12,11 @@ type RunResult struct {
 
 func main() {
 	if isCompilerBootstrapProcess() {
-		m := loadConfig()
-		initLog(m)
+		m, err := loadBootstrapConfig()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "compiler: load bootstrap config: %v\n", err)
+			os.Exit(1)
+		}
 		bootstrapCompile(m)
 		return
 	}

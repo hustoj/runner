@@ -201,6 +201,212 @@ func TestLoadConfigRejectsInvalidArgsJSONType(t *testing.T) {
 	})
 }
 
+func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
+	tests := []struct {
+		name    string
+		uid     int
+		gid     int
+		wantErr bool
+	}{
+		{"both -1", -1, -1, false},
+		{"both 0", 0, 0, false},
+		{"both positive", 1000, 1000, false},
+		{"uid positive gid -1", 1000, -1, true},
+		{"uid -1 gid positive", -1, 1000, true},
+		{"uid positive gid 0", 1000, 0, true},
+		{"uid 0 gid positive", 0, 1000, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &CompileConfig{RunUID: tt.uid, RunGID: tt.gid}
+			err := cfg.ValidateSandbox()
+			if tt.wantErr && err == nil {
+				t.Fatal("ValidateSandbox() should return error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateSandbox() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidateSandboxRejectsNonexistentChrootDir(t *testing.T) {
+	cfg := &CompileConfig{
+		RunUID:    -1,
+		RunGID:    -1,
+		ChrootDir: "/nonexistent/chroot/dir/12345",
+	}
+
+	err := cfg.ValidateSandbox()
+	if err == nil {
+		t.Fatal("ValidateSandbox() should return error for nonexistent ChrootDir")
+	}
+}
+
+func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "not_a_dir")
+	if err := os.WriteFile(tmpFile, []byte("test"), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	cfg := &CompileConfig{
+		RunUID:    -1,
+		RunGID:    -1,
+		ChrootDir: tmpFile,
+	}
+
+	err := cfg.ValidateSandbox()
+	if err == nil {
+		t.Fatal("ValidateSandbox() should return error when ChrootDir is not a directory")
+	}
+}
+
+func TestValidateSandboxAcceptsValidChrootDir(t *testing.T) {
+	cfg := &CompileConfig{
+		RunUID:    -1,
+		RunGID:    -1,
+		ChrootDir: t.TempDir(),
+	}
+
+	if err := cfg.ValidateSandbox(); err != nil {
+		t.Fatalf("ValidateSandbox() error = %v, want nil", err)
+	}
+}
+
+func TestValidateSandboxRejectsRelativeWorkDirWithChroot(t *testing.T) {
+	cfg := &CompileConfig{
+		RunUID:    -1,
+		RunGID:    -1,
+		ChrootDir: t.TempDir(),
+		WorkDir:   "work",
+	}
+
+	if err := cfg.ValidateSandbox(); err == nil {
+		t.Fatal("ValidateSandbox() should reject relative WorkDir with ChrootDir")
+	}
+}
+
+func TestSandboxWorkDirDefaultsToRootWhenChrootSet(t *testing.T) {
+	cfg := &CompileConfig{ChrootDir: "/jail"}
+
+	got, err := cfg.sandboxWorkDir()
+	if err != nil {
+		t.Fatalf("sandboxWorkDir() error = %v", err)
+	}
+	if got != "/" {
+		t.Fatalf("sandboxWorkDir() = %q, want /", got)
+	}
+}
+
+func TestSandboxWorkDirPreservesInheritedCwdWithoutChroot(t *testing.T) {
+	cfg := &CompileConfig{}
+
+	got, err := cfg.sandboxWorkDir()
+	if err != nil {
+		t.Fatalf("sandboxWorkDir() error = %v", err)
+	}
+	if got != "" {
+		t.Fatalf("sandboxWorkDir() = %q, want empty", got)
+	}
+}
+
+func TestSandboxWorkDirUsesExplicitWorkDir(t *testing.T) {
+	cfg := &CompileConfig{ChrootDir: "/jail", WorkDir: "/work"}
+
+	got, err := cfg.sandboxWorkDir()
+	if err != nil {
+		t.Fatalf("sandboxWorkDir() error = %v", err)
+	}
+	if got != "/work" {
+		t.Fatalf("sandboxWorkDir() = %q, want /work", got)
+	}
+}
+
+func TestSandboxWorkDirRejectsRelativeWorkDirWithChroot(t *testing.T) {
+	cfg := &CompileConfig{ChrootDir: "/jail", WorkDir: "work"}
+
+	if _, err := cfg.sandboxWorkDir(); err == nil {
+		t.Fatal("sandboxWorkDir() should reject relative WorkDir with ChrootDir")
+	}
+}
+
+func TestLoadBootstrapConfigRequiresEnv(t *testing.T) {
+	previous, hadPrevious := os.LookupEnv(compilerBootstrapConfigEnv)
+	if err := os.Unsetenv(compilerBootstrapConfigEnv); err != nil {
+		t.Fatalf("os.Unsetenv(%s) error = %v", compilerBootstrapConfigEnv, err)
+	}
+	t.Cleanup(func() {
+		if hadPrevious {
+			_ = os.Setenv(compilerBootstrapConfigEnv, previous)
+			return
+		}
+		_ = os.Unsetenv(compilerBootstrapConfigEnv)
+	})
+
+	if _, err := loadBootstrapConfig(); err == nil {
+		t.Fatal("loadBootstrapConfig() should reject missing bootstrap config env")
+	}
+}
+
+func TestLoadBootstrapConfigRejectsEmptyEnv(t *testing.T) {
+	t.Setenv(compilerBootstrapConfigEnv, "")
+
+	if _, err := loadBootstrapConfig(); err == nil {
+		t.Fatal("loadBootstrapConfig() should reject empty bootstrap config env")
+	}
+}
+
+func TestBootstrapConfigRoundTripPreservesFields(t *testing.T) {
+	cfg := &CompileConfig{
+		CPU:        5,
+		Memory:     256,
+		Output:     32,
+		Stack:      16,
+		Command:    "g++",
+		Verbose:    true,
+		LogPath:    "/tmp/compiler.log",
+		Args:       newCompileArgs("main.cpp", "-o", "main", "-O2"),
+		RunUID:     1000,
+		RunGID:     2000,
+		ChrootDir:  "/jail",
+		WorkDir:    "/work",
+		NoNewPrivs: true,
+		UseMountNS: true,
+		UseIPCNS:   true,
+		UseUTSNS:   true,
+		UseNetNS:   true,
+	}
+
+	encoded, err := encodeBootstrapConfig(cfg)
+	if err != nil {
+		t.Fatalf("encodeBootstrapConfig() error = %v", err)
+	}
+	t.Setenv(compilerBootstrapConfigEnv, encoded)
+
+	got, err := loadBootstrapConfig()
+	if err != nil {
+		t.Fatalf("loadBootstrapConfig() error = %v", err)
+	}
+
+	if got.CPU != 5 || got.Memory != 256 || got.Output != 32 || got.Stack != 16 {
+		t.Fatalf("resource fields = cpu:%d memory:%d output:%d stack:%d", got.CPU, got.Memory, got.Output, got.Stack)
+	}
+	if got.Command != "g++" || !got.Verbose || got.LogPath != "/tmp/compiler.log" {
+		t.Fatalf("basic fields = command:%q verbose:%v logPath:%q", got.Command, got.Verbose, got.LogPath)
+	}
+	assertStringSliceEqual(t, got.Args.Values(), []string{"main.cpp", "-o", "main", "-O2"}, "bootstrap Args")
+	if got.RunUID != 1000 || got.RunGID != 2000 {
+		t.Fatalf("UID/GID = %d/%d, want 1000/2000", got.RunUID, got.RunGID)
+	}
+	if got.ChrootDir != "/jail" || got.WorkDir != "/work" || !got.NoNewPrivs {
+		t.Fatalf("sandbox paths/flags = chroot:%q work:%q noNewPrivs:%v", got.ChrootDir, got.WorkDir, got.NoNewPrivs)
+	}
+	if !got.UseMountNS || !got.UseIPCNS || !got.UseUTSNS || !got.UseNetNS {
+		t.Fatalf("namespace flags = mount:%v ipc:%v uts:%v net:%v", got.UseMountNS, got.UseIPCNS, got.UseUTSNS, got.UseNetNS)
+	}
+}
+
 func assertStringSliceEqual(t *testing.T, got []string, want []string, label string) {
 	t.Helper()
 	if len(got) != len(want) {

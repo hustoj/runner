@@ -126,6 +126,15 @@ func TestLoadConfigDefaultsToSafeCompilerSandbox(t *testing.T) {
 	})
 }
 
+func TestValidateSandboxRejectsDisabledNoNewPrivs(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
+	cfg := &CompileConfig{RunUID: -1, RunGID: -1, NoNewPrivs: false, MaxProcs: 32}
+	if err := cfg.ValidateSandbox(); err == nil {
+		t.Fatal("ValidateSandbox() should reject disabled NoNewPrivs")
+	}
+}
+
 func TestLoadConfigFallsBackToCommandSplitWhenArgsIsNull(t *testing.T) {
 	runWithTempCompileJSON(t, `{"command":"sh -c 'printf ok'","args":null}`, func(compilePath string) {
 		cfg := loadConfigWithLoader(t, compilePath, nil)
@@ -233,7 +242,10 @@ func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &CompileConfig{RunUID: tt.uid, RunGID: tt.gid, MaxProcs: 32}
+			cfg := validSandboxConfig()
+			cfg.RunUID = tt.uid
+			cfg.RunGID = tt.gid
+
 			err := cfg.ValidateSandbox()
 			if tt.wantErr && err == nil {
 				t.Fatal("ValidateSandbox() should return error")
@@ -248,12 +260,8 @@ func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
 func TestValidateSandboxRejectsNonexistentChrootDir(t *testing.T) {
 	withCompilerEffectiveUID(t, 1000)
 
-	cfg := &CompileConfig{
-		RunUID:    -1,
-		RunGID:    -1,
-		MaxProcs:  32,
-		ChrootDir: "/nonexistent/chroot/dir/12345",
-	}
+	cfg := validSandboxConfig()
+	cfg.ChrootDir = "/nonexistent/chroot/dir/12345"
 
 	err := cfg.ValidateSandbox()
 	if err == nil {
@@ -269,12 +277,8 @@ func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
 		t.Fatalf("write temp file: %v", err)
 	}
 
-	cfg := &CompileConfig{
-		RunUID:    -1,
-		RunGID:    -1,
-		MaxProcs:  32,
-		ChrootDir: tmpFile,
-	}
+	cfg := validSandboxConfig()
+	cfg.ChrootDir = tmpFile
 
 	err := cfg.ValidateSandbox()
 	if err == nil {
@@ -285,12 +289,8 @@ func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
 func TestValidateSandboxAcceptsValidChrootDir(t *testing.T) {
 	withCompilerEffectiveUID(t, 1000)
 
-	cfg := &CompileConfig{
-		RunUID:    -1,
-		RunGID:    -1,
-		MaxProcs:  32,
-		ChrootDir: t.TempDir(),
-	}
+	cfg := validSandboxConfig()
+	cfg.ChrootDir = t.TempDir()
 
 	if err := cfg.ValidateSandbox(); err != nil {
 		t.Fatalf("ValidateSandbox() error = %v, want nil", err)
@@ -300,13 +300,9 @@ func TestValidateSandboxAcceptsValidChrootDir(t *testing.T) {
 func TestValidateSandboxRejectsRelativeWorkDirWithChroot(t *testing.T) {
 	withCompilerEffectiveUID(t, 1000)
 
-	cfg := &CompileConfig{
-		RunUID:    -1,
-		RunGID:    -1,
-		MaxProcs:  32,
-		ChrootDir: t.TempDir(),
-		WorkDir:   "work",
-	}
+	cfg := validSandboxConfig()
+	cfg.ChrootDir = t.TempDir()
+	cfg.WorkDir = "work"
 
 	if err := cfg.ValidateSandbox(); err == nil {
 		t.Fatal("ValidateSandbox() should reject relative WorkDir with ChrootDir")
@@ -316,7 +312,7 @@ func TestValidateSandboxRejectsRelativeWorkDirWithChroot(t *testing.T) {
 func TestValidateSandboxRejectsRootWithoutCredentialDrop(t *testing.T) {
 	withCompilerEffectiveUID(t, 0)
 
-	cfg := &CompileConfig{RunUID: -1, RunGID: -1, MaxProcs: 32}
+	cfg := validSandboxConfig()
 	if err := cfg.ValidateSandbox(); err == nil {
 		t.Fatal("ValidateSandbox() should reject root compiler without RunUID/RunGID")
 	}
@@ -325,7 +321,9 @@ func TestValidateSandboxRejectsRootWithoutCredentialDrop(t *testing.T) {
 func TestValidateSandboxAllowsRootWithCredentialDrop(t *testing.T) {
 	withCompilerEffectiveUID(t, 0)
 
-	cfg := &CompileConfig{RunUID: 1536, RunGID: 1536, MaxProcs: 32}
+	cfg := validSandboxConfig()
+	cfg.RunUID = 1536
+	cfg.RunGID = 1536
 	if err := cfg.ValidateSandbox(); err != nil {
 		t.Fatalf("ValidateSandbox() error = %v, want nil", err)
 	}
@@ -459,6 +457,10 @@ func TestBootstrapConfigRoundTripPreservesFields(t *testing.T) {
 	if !got.UseMountNS || !got.UseIPCNS || !got.UseUTSNS || !got.UseNetNS {
 		t.Fatalf("namespace flags = mount:%v ipc:%v uts:%v net:%v", got.UseMountNS, got.UseIPCNS, got.UseUTSNS, got.UseNetNS)
 	}
+}
+
+func validSandboxConfig() *CompileConfig {
+	return &CompileConfig{RunUID: -1, RunGID: -1, NoNewPrivs: true, MaxProcs: 32}
 }
 
 func assertStringSliceEqual(t *testing.T, got []string, want []string, label string) {

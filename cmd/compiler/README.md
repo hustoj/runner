@@ -35,7 +35,8 @@
 - 如果未提供 `Args`，`compiler` 会像 `runner` 一样尝试对 `Command` 做 `shlex` 拆分。
 - 父进程只在宿主侧读取 `compile.json`；bootstrap child 通过环境变量恢复配置，然后在 exec 编译器前自行应用 namespace、`chroot`、`WorkDir`、`NoNewPrivs` 和 UID/GID 降权。
 - 父进程会为编译过程创建 task cgroup，按 `Memory` / `MaxProcs` 写入 `memory.max` / `pids.max`；bootstrap child 会先等待 cgroup gate，父进程成功 `MovePID` 后才放行，并用 wall-clock watchdog 在超时后杀 cgroup 和进程组。
-- `NoNewPrivs` 默认开启；如果 compiler 以 root 启动且未配置正数 `RunUID` / `RunGID`，会 fail-closed 拒绝运行。
+- `NoNewPrivs` 默认且强制开启；如果配置为 `false`，或 compiler 以 root 启动且未配置正数 `RunUID` / `RunGID`，都会 fail-closed 拒绝运行。
+- 编译阶段建议由容器/调度层使用 `docker run --network none` 禁止网络访问；如果启动权限允许，也可以显式配置 `UseNetNS=true` 让 bootstrap child 自行创建 network namespace。
 - 配置 `ChrootDir` 时，空 `WorkDir` 默认表示 chroot 内的 `/`；非空 `WorkDir` 必须是绝对路径。jail 内不需要包含 compiler 二进制或 `compile.json`，但必须包含最终编译命令所需的工具链、源码和运行时依赖。
 
 ## 日志输出

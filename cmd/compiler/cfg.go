@@ -97,11 +97,11 @@ type CompileConfig struct {
 	RunGID     int    `default:"-1"`    // Target GID (-1 = no privilege drop)
 	ChrootDir  string `default:""`      // Chroot jail directory (empty = no chroot)
 	WorkDir    string `default:""`      // Working directory inside chroot (empty = /; must be absolute with chroot)
-	NoNewPrivs bool   `default:"true"`  // Set PR_SET_NO_NEW_PRIVS before exec
+	NoNewPrivs bool   `default:"true"`  // Required PR_SET_NO_NEW_PRIVS before exec
 	UseMountNS bool   `default:"false"` // Isolate mount points
 	UseIPCNS   bool   `default:"false"` // Isolate IPC resources
 	UseUTSNS   bool   `default:"false"` // Isolate hostname/domainname
-	UseNetNS   bool   `default:"false"` // Isolate network stack
+	UseNetNS   bool   `default:"false"` // Isolate network stack when supported by launcher privileges
 
 	commands []string
 	parseErr error
@@ -109,7 +109,10 @@ type CompileConfig struct {
 
 var compilerEffectiveUID = os.Geteuid
 
-const compilerPrivilegedChildRequiredError = "running compiler as root without dropping to unprivileged RunUID/RunGID is unsafe"
+const (
+	compilerNoNewPrivsRequiredError      = "compiler no_new_privs must be enabled"
+	compilerPrivilegedChildRequiredError = "running compiler as root without dropping to unprivileged RunUID/RunGID is unsafe"
+)
 
 func encodeBootstrapConfig(config *CompileConfig) (string, error) {
 	data, err := json.Marshal(config)
@@ -199,6 +202,9 @@ func loadConfig() *CompileConfig {
 func (config *CompileConfig) ValidateSandbox() error {
 	if err := config.validateResourceLimits(); err != nil {
 		return err
+	}
+	if !config.NoNewPrivs {
+		return errors.New(compilerNoNewPrivsRequiredError)
 	}
 	uidSet := config.RunUID > 0
 	gidSet := config.RunGID > 0

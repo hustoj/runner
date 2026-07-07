@@ -17,6 +17,7 @@
 
 - `/data` 是默认工作目录
 - `/var/log/runner` 用于日志卷
+- 编译容器建议以 `docker run --network none ...` 启动，禁止不可信编译阶段联网
 - 这里的 `runner` / `compiler` 文件通常是构建产物，不是手写源码
 
 ## 相关目录

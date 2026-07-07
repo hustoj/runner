@@ -20,6 +20,7 @@
 - `VOLUME /data`
 - `VOLUME /var/log/runner`
 - `CMD ["compiler"]`
+- 运行编译容器时建议使用 `docker run --network none ...`，由容器运行时统一禁止编译阶段联网。
 
 ## 相关目录
 

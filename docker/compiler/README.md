@@ -4,7 +4,7 @@
 
 ## 当前文件
 
-- `Dockerfile`：基于 `ubuntu`，安装 `gcc`、`g++`、`fp-compiler`、`openjdk-8-jdk-headless`，复制 `compiler` 到 `/usr/bin/`，默认工作目录是 `/data`。
+- `Dockerfile`：基于 `ubuntu`，安装 `gcc`、`g++`、`fp-compiler`、`openjdk-8-jdk-headless`，复制 `compiler` 到 `/usr/bin/`，将 `/data` 和 `/var/log/runner` 授权给 `judger`，默认切换到 `judger` 用户运行。
 
 ## 适合来这里排查的问题
 
@@ -16,6 +16,7 @@
 
 - `COPY compiler /usr/bin/`
 - `WORKDIR /data`
+- `USER judger`
 - `VOLUME /data`
 - `VOLUME /var/log/runner`
 - `CMD ["compiler"]`

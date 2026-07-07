@@ -5,7 +5,7 @@
 ## 子目录速览
 
 - `runner/`：运行时镜像，安装 Java 运行时，复制 `runner` 二进制，默认 `CMD ["runner"]`
-- `compiler/`：编译镜像，安装 `gcc`、`g++`、`fp-compiler`、`openjdk-8-jdk-headless`，复制 `compiler` 二进制，默认 `CMD ["compiler"]`
+- `compiler/`：编译镜像，安装 `gcc`、`g++`、`fp-compiler`、`openjdk-8-jdk-headless`，复制 `compiler` 二进制，默认以 `judger` 用户执行 `CMD ["compiler"]`
 
 ## 常见检索入口
 

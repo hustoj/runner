@@ -46,6 +46,7 @@ func TestValidateAcceptsValidSyscallNames(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	json := `{"OneTimeCalls":["execve"],"AllowedCalls":["read","write","brk"],"AdditionCalls":["mmap"],"AllowPrivilegedChild":true}`
 	runWithTempCaseJSON(t, json, func() {
 		SetLogger(nil)
@@ -64,6 +65,7 @@ func TestValidateAcceptsHybridSyscallBackend(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	json := `{"SyscallBackend":"hybrid","NoNewPrivs":true,"OneTimeCalls":["execve"],"AllowedCalls":["read"],"AdditionCalls":["write"],"AllowPrivilegedChild":true}`
 	runWithTempCaseJSON(t, json, func() {
 		SetLogger(nil)
@@ -103,6 +105,7 @@ func TestValidateRuntimeSecurityRejectsRootWithoutPrivilegeDropOrOptIn(t *testin
 }
 
 func TestValidateRuntimeSecurityAcceptsNonRootOrPrivilegeDropOrOptIn(t *testing.T) {
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	tests := []struct {
 		name   string
 		config TaskConfig
@@ -120,6 +123,28 @@ func TestValidateRuntimeSecurityAcceptsNonRootOrPrivilegeDropOrOptIn(t *testing.
 				t.Fatalf("validateRuntimeSecurity() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateRuntimeSecurityRejectsAllowPrivilegedChildWithoutEnvVar(t *testing.T) {
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "0")
+	config := TaskConfig{RunUID: -1, RunGID: -1, AllowPrivilegedChild: true}
+
+	err := config.validateRuntimeSecurity(0)
+	if err == nil {
+		t.Fatal("validateRuntimeSecurity() error = nil, want env var acknowledgment rejection")
+	}
+	if !strings.Contains(err.Error(), "RUNNER_ALLOW_UNSAFE_TEST_MODE=1") {
+		t.Fatalf("validateRuntimeSecurity() error = %q, want env var guidance", err)
+	}
+}
+
+func TestValidateRuntimeSecurityIgnoresEnvVarForNonRoot(t *testing.T) {
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "0")
+	config := TaskConfig{RunUID: -1, RunGID: -1, AllowPrivilegedChild: true}
+
+	if err := config.validateRuntimeSecurity(1000); err != nil {
+		t.Fatalf("validateRuntimeSecurity(non-root) error = %v, want nil (env var check is root-only)", err)
 	}
 }
 

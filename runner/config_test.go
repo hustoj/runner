@@ -12,6 +12,7 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	runWithTempCaseJSON(t, `{"UseNetNS":true,"RunUID":-1,"RunGID":-1,"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 
@@ -92,6 +93,7 @@ func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	runWithTempCaseJSON(t, `{"MemoryReserve":32,"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 

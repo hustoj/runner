@@ -133,7 +133,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 ### 6.3 namespace / chroot / 降权
 
-[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。Linux 上 root 启动且未配置 `RunUID`/`RunGID` 时默认 fail-closed；测试或兼容场景必须显式设置 `AllowPrivilegedChild: true` 才能保留 root 子进程。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
+[sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。Linux 上 root 启动且未配置 `RunUID`/`RunGID` 时默认 fail-closed；显式 `AllowPrivilegedChild: true` 还需要环境变量 `RUNNER_ALLOW_UNSAFE_TEST_MODE=1` 二次确认，以避免生产环境误用。root 子进程在 sandbox 步骤后会 drop 全部 capability（含 `CAP_SYS_RESOURCE`），作为 defense-in-depth；但这不替代 `RunUID`/`RunGID` 降权或 chroot/namespace 隔离。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
 
 ## 7. 资源判杰契约
 

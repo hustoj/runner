@@ -8,6 +8,7 @@ func TestLoadConfigAddsAMD64DefaultCalls(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
 	runWithTempCaseJSON(t, `{"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 

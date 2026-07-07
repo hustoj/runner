@@ -39,6 +39,7 @@ pre-commit-install:
 pre-commit-run:
 	pre-commit run --all-files
 
+testall: export RUNNER_ALLOW_UNSAFE_TEST_MODE := 1
 testall: prepare
 	cd tests/general;make
 	cd tests/clone-syscall-phase;make

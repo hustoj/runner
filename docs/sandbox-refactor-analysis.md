@@ -251,8 +251,11 @@ UseNetNS: false
    - 建议先在 C/C++ 路径上实现 hybrid 模式
 
 5. **✅ 补充关键 capability drop**
-   - child 在降权前清理 `CAP_SYS_RESOURCE` 的 effective/permitted/inheritable 位，并在需要时执行 `PR_CAPBSET_DROP`
-   - 目标是防止 root 子进程通过 `prlimit64` 抬高 hard rlimit；更大范围的 capability 收敛可按后续威胁模型继续推进
+   - child 在 sandbox 步骤（namespace/chroot/no_new_privs/setgroups/setgid/setuid）之后、ptrace 之前 drop 全部 capability（bounding set + effective/permitted/inheritable），而非仅清理 `CAP_SYS_RESOURCE`
+   - 放在 sandbox 之后是因为 chroot 需要 `CAP_SYS_CHROOT`、unshare 需要 `CAP_SYS_ADMIN`、setgid/setuid 需要 `CAP_SETGID/CAP_SETUID`；drop 全部 cap 必须在它们完成之后
+   - 非 root 子进程（已完成 setuid 降权）短路跳过：内核已清空 effective/permitted，且非 root 无法执行 `PR_CAPBSET_DROP`
+   - root 子进程（`AllowPrivilegedChild=true` 路径）清空全部 cap 作为 defense-in-depth，配合 `NoNewPrivs` 阻止 execve 后通过 setuid binary 或 file capability 重新提权
+   - 启用 `AllowPrivilegedChild=true` 还需要环境变量 `RUNNER_ALLOW_UNSAFE_TEST_MODE=1` 二次确认
 
 6. **🏗️ 重构到 exec.Cmd**
    - 彻底解决 Go raw fork 问题

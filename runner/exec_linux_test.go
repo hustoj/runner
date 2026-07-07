@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-
-	"golang.org/x/sys/unix"
 )
 
 func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
@@ -165,26 +163,18 @@ func TestChildStageSeccompString(t *testing.T) {
 	}
 }
 
-func TestChildStageDropSysResourceCapabilityString(t *testing.T) {
-	if got := childStageDropSysResourceCapability.String(); got != "drop CAP_SYS_RESOURCE" {
-		t.Fatalf("childStageDropSysResourceCapability.String() = %q", got)
+func TestChildStageDropCapabilitiesString(t *testing.T) {
+	if got := childStageDropCapabilities.String(); got != "drop capabilities" {
+		t.Fatalf("childStageDropCapabilities.String() = %q", got)
 	}
 }
 
-func TestClearCapabilityRemovesCapabilityFromAllSets(t *testing.T) {
-	word, mask := capabilityMask(unix.CAP_SYS_RESOURCE)
-	data := [2]unix.CapUserData{}
-	data[word] = unix.CapUserData{
-		Effective:   mask,
-		Permitted:   mask,
-		Inheritable: mask,
+func TestDropAllCapabilitiesNoopsForNonRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to verify no-op short-circuit")
 	}
-
-	if !clearCapability(&data, unix.CAP_SYS_RESOURCE) {
-		t.Fatal("clearCapability() changed = false, want true")
-	}
-	if data[word].Effective&mask != 0 || data[word].Permitted&mask != 0 || data[word].Inheritable&mask != 0 {
-		t.Fatalf("CAP_SYS_RESOURCE not fully cleared from %+v", data[word])
+	if errno := dropAllCapabilities(); errno != 0 {
+		t.Fatalf("dropAllCapabilities() = %v, want 0 for non-root", errno)
 	}
 }
 

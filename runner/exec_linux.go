@@ -36,7 +36,7 @@ const (
 	childStageSandboxSetgroups
 	childStageSandboxSetgid
 	childStageSandboxSetuid
-	childStageDropSysResourceCapability
+	childStageDropCapabilities
 	childStagePtraceTraceme
 	childStagePtraceSync
 	childStageSeccomp
@@ -94,8 +94,8 @@ func (s childStartupStage) String() string {
 		return "setgid"
 	case childStageSandboxSetuid:
 		return "setuid"
-	case childStageDropSysResourceCapability:
-		return "drop CAP_SYS_RESOURCE"
+	case childStageDropCapabilities:
+		return "drop capabilities"
 	case childStagePtraceTraceme:
 		return "ptrace traceme"
 	case childStagePtraceSync:
@@ -573,11 +573,11 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 		reportChildStartupFailure(startupPipeWriteFD, childStageSetProcessGroup, errno)
 	}
 
-	if errno := dropSysResourceCapability(); errno != 0 {
-		reportChildStartupFailure(startupPipeWriteFD, childStageDropSysResourceCapability, errno)
-	}
 	if failure := applySandboxInChild(spec.sandbox); failure.failed() {
 		reportChildStartupFailure(startupPipeWriteFD, failure.stage, failure.errno)
+	}
+	if errno := dropAllCapabilities(); errno != 0 {
+		reportChildStartupFailure(startupPipeWriteFD, childStageDropCapabilities, errno)
 	}
 	if errno := ptraceTraceme(); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStagePtraceTraceme, errno)
@@ -686,72 +686,44 @@ func rawSetpgid(pid int, pgid int) syscall.Errno {
 	return errno
 }
 
-func dropSysResourceCapability() syscall.Errno {
-	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
-	data := [2]unix.CapUserData{}
-	if errno := rawCapget(&header, &data[0]); errno != 0 {
-		return errno
+// capabilityCount is the upper bound of capability indices representable in the
+// capset ABI (two u32 words = 64 bits). Linux capability numbers are currently
+// well below this bound; iterating up to 64 with EINVAL-tolerance covers future
+// kernels without an ABI bump.
+const capabilityCount = 64
+
+// dropAllCapabilities clears every capability from the bounding set, then
+// clears the effective, permitted, and inheritable sets. It is a no-op for
+// non-root children because setuid has already cleared effective/permitted and
+// non-root cannot drop bounding entries. For root children (the
+// AllowPrivilegedChild path) it provides defense-in-depth before execve: the
+// child retains no privileges and, combined with NoNewPrivs, cannot regain any
+// via setuid binaries or file capabilities.
+//
+// This runs after applySandboxInChild so that sandbox steps which require
+// capabilities (chroot, unshare, setgid, setuid) still see them.
+func dropAllCapabilities() syscall.Errno {
+	if rawGeteuid() != 0 {
+		return 0
 	}
-	dropBounding, errno := shouldDropCapabilityBounding(data, unix.CAP_SYS_RESOURCE)
-	if errno != 0 {
-		return errno
-	}
-	if clearCapability(&data, unix.CAP_SYS_RESOURCE) {
-		if errno := rawCapset(&header, &data[0]); errno != 0 {
+	// Drop all capabilities from the bounding set first. This requires
+	// CAP_SETPCAP in the effective set; root retains it until we clear
+	// effective/permitted below. PR_CAPBSET_DROP only touches the bounding
+	// set, so CAP_SETPCAP stays effective across these calls.
+	for capability := 0; capability < capabilityCount; capability++ {
+		errno := rawPrctl(unix.PR_CAPBSET_DROP, capability, 0, 0, 0)
+		if errno == syscall.EINVAL {
+			// Capability number not supported on this kernel.
+			continue
+		}
+		if errno != 0 {
 			return errno
 		}
 	}
-	if !dropBounding {
-		return 0
-	}
-	return rawPrctl(unix.PR_CAPBSET_DROP, unix.CAP_SYS_RESOURCE, 0, 0, 0)
-}
-
-func shouldDropCapabilityBounding(data [2]unix.CapUserData, capability int) (bool, syscall.Errno) {
-	if capabilityEffectiveOrPermitted(data, capability) {
-		return true, 0
-	}
-	if rawGeteuid() != 0 {
-		return false, 0
-	}
-	return rawCapabilityInBoundingSet(capability)
-}
-
-func capabilityEffectiveOrPermitted(data [2]unix.CapUserData, capability int) bool {
-	word, mask := capabilityMask(capability)
-	if word < 0 || word >= len(data) {
-		return false
-	}
-	return data[word].Effective&mask != 0 || data[word].Permitted&mask != 0
-}
-
-func clearCapability(data *[2]unix.CapUserData, capability int) bool {
-	word, mask := capabilityMask(capability)
-	if word < 0 || word >= len(data) {
-		return false
-	}
-	before := data[word]
-	data[word].Effective &^= mask
-	data[word].Permitted &^= mask
-	data[word].Inheritable &^= mask
-	return before != data[word]
-}
-
-func capabilityMask(capability int) (int, uint32) {
-	if capability < 0 {
-		return -1, 0
-	}
-	return capability / 32, uint32(1) << uint(capability%32)
-}
-
-func rawCapget(header *unix.CapUserHeader, data *unix.CapUserData) syscall.Errno {
-	_, _, errno := syscall.RawSyscall(
-		syscall.SYS_CAPGET,
-		uintptr(unsafe.Pointer(header)),
-		uintptr(unsafe.Pointer(data)),
-		0,
-	)
-	return errno
+	// Clear effective, permitted, and inheritable capability sets.
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	data := [2]unix.CapUserData{}
+	return rawCapset(&header, &data[0])
 }
 
 func rawCapset(header *unix.CapUserHeader, data *unix.CapUserData) syscall.Errno {
@@ -767,22 +739,6 @@ func rawCapset(header *unix.CapUserHeader, data *unix.CapUserData) syscall.Errno
 func rawGeteuid() uintptr {
 	uid, _, _ := syscall.RawSyscall(syscall.SYS_GETEUID, 0, 0, 0)
 	return uid
-}
-
-func rawCapabilityInBoundingSet(capability int) (bool, syscall.Errno) {
-	ret, _, errno := syscall.RawSyscall6(
-		syscall.SYS_PRCTL,
-		uintptr(unix.PR_CAPBSET_READ),
-		uintptr(capability),
-		0,
-		0,
-		0,
-		0,
-	)
-	if errno != 0 {
-		return false, errno
-	}
-	return ret == 1, 0
 }
 
 func rawPrctl(option int, arg2 int, arg3 int, arg4 int, arg5 int) syscall.Errno {

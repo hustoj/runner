@@ -426,11 +426,7 @@ func waitCompilerChildAfterKill(pid int) {
 }
 
 func killCompilerProcessTree(pid int, controller runner.TaskController) {
-	if controller != nil {
-		if err := controller.Kill(); err != nil {
-			warnf("kill compiler task cgroup failed: %v", err)
-		}
-	}
+	killAndDrainCompilerTaskCgroup(controller)
 	if pid <= 0 {
 		return
 	}
@@ -438,17 +434,30 @@ func killCompilerProcessTree(pid int, controller runner.TaskController) {
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
+func killAndDrainCompilerTaskCgroup(controller runner.TaskController) {
+	if controller == nil {
+		return
+	}
+	if err := controller.Kill(); err != nil {
+		warnf("kill and drain compiler task cgroup failed: %v", err)
+	}
+}
+
 func cleanupCompilerTaskController(pid int, controller runner.TaskController) {
 	if controller == nil {
 		return
 	}
+	killAndDrainCompilerTaskCgroup(controller)
 	if err := controller.Cleanup(); err == nil {
 		return
 	} else {
 		warnf("cleanup compiler task cgroup failed: %v", err)
 	}
 
-	killCompilerProcessTree(pid, controller)
+	if pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
 	if err := controller.Cleanup(); err != nil {
 		warnf("cleanup compiler task cgroup after kill failed: %v", err)
 	}

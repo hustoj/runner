@@ -330,8 +330,17 @@ func TestHandleMovesCompilerIntoTaskController(t *testing.T) {
 	if fakeController.cleanupCalls == 0 {
 		t.Fatal("Cleanup was not called")
 	}
-	if fakeController.killed {
-		t.Fatal("Kill should not be called for a clean compile")
+	if !fakeController.killed {
+		t.Fatal("Kill should drain the compiler task cgroup before cleanup")
+	}
+	wantCalls := []string{"kill", "cleanup"}
+	if len(fakeController.calls) != len(wantCalls) {
+		t.Fatalf("controller calls = %v, want %v", fakeController.calls, wantCalls)
+	}
+	for i := range wantCalls {
+		if fakeController.calls[i] != wantCalls[i] {
+			t.Fatalf("controller calls = %v, want %v", fakeController.calls, wantCalls)
+		}
 	}
 }
 
@@ -364,6 +373,7 @@ type fakeCompilerTaskController struct {
 	movedPID     int
 	cleanupCalls int
 	killed       bool
+	calls        []string
 	killCh       chan struct{}
 	killOnce     sync.Once
 }
@@ -375,6 +385,7 @@ func (controller *fakeCompilerTaskController) MovePID(pid int) error {
 
 func (controller *fakeCompilerTaskController) Kill() error {
 	controller.killed = true
+	controller.calls = append(controller.calls, "kill")
 	if controller.killCh != nil {
 		controller.killOnce.Do(func() { close(controller.killCh) })
 	}
@@ -383,6 +394,7 @@ func (controller *fakeCompilerTaskController) Kill() error {
 
 func (controller *fakeCompilerTaskController) Cleanup() error {
 	controller.cleanupCalls++
+	controller.calls = append(controller.calls, "cleanup")
 	return nil
 }
 

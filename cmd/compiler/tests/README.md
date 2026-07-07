@@ -15,6 +15,7 @@
 - `16g/`：大内存压力场景。
 - `bigexe/`：大体积产物相关场景。
 - `build_bomb/`：异常或极端编译负载场景。
+- `cgroup-cleanup/`：后台 helper 主动脱离原进程组后仍由 compiler cgroup cleanup 清理。
 
 ## 适合来这里排查的问题
 

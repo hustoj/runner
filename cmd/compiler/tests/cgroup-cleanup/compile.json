@@ -1,0 +1,10 @@
+{
+  "CPU": 1,
+  "Memory": 128,
+  "Output": 16,
+  "Stack": 8,
+  "MaxProcs": 32,
+  "Command": "sh",
+  "Args": ["-c", "setsid sleep 7784 & exit 0"],
+  "LogPath": "/dev/stderr"
+}

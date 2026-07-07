@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -174,5 +175,107 @@ func TestSetCompileAlarmPropagatesSetitimerError(t *testing.T) {
 	err := setCompileAlarm(1)
 	if !errors.Is(err, syscall.EINVAL) {
 		t.Fatalf("setCompileAlarm() error = %v, want %v", err, syscall.EINVAL)
+	}
+}
+
+func TestSetNoNewPrivsSucceeds(t *testing.T) {
+	// prctl(PR_SET_NO_NEW_PRIVS, 1) should succeed for any process.
+	errno := setNoNewPrivs()
+	if errno != 0 {
+		t.Fatalf("setNoNewPrivs() errno = %v, want 0", errno)
+	}
+}
+
+func TestCompilerNamespaceFlags(t *testing.T) {
+	cfg := &CompileConfig{
+		UseMountNS: true,
+		UseIPCNS:   true,
+		UseUTSNS:   true,
+		UseNetNS:   true,
+	}
+
+	want := unix.CLONE_NEWNS | unix.CLONE_NEWIPC | unix.CLONE_NEWUTS | unix.CLONE_NEWNET
+	if got := compilerNamespaceFlags(cfg); got != want {
+		t.Fatalf("compilerNamespaceFlags() = %#x, want %#x", got, want)
+	}
+}
+
+func TestApplyCompilerRootFSPreservesCwdWithoutSandboxWorkDir(t *testing.T) {
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+
+	if err := applyCompilerRootFS(&CompileConfig{}); err != nil {
+		t.Fatalf("applyCompilerRootFS() error = %v", err)
+	}
+
+	currentWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	if currentWD != previousWD {
+		t.Fatalf("cwd = %q, want %q", currentWD, previousWD)
+	}
+}
+
+func TestApplyCompilerRootFSUsesExplicitWorkDirWithoutChroot(t *testing.T) {
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(previousWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+
+	workDir := t.TempDir()
+	if err := applyCompilerRootFS(&CompileConfig{WorkDir: workDir}); err != nil {
+		t.Fatalf("applyCompilerRootFS() error = %v", err)
+	}
+
+	currentWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	if currentWD != workDir {
+		t.Fatalf("cwd = %q, want %q", currentWD, workDir)
+	}
+}
+
+func TestApplyCompilerRootFSRejectsRelativeWorkDirBeforeChroot(t *testing.T) {
+	err := applyCompilerRootFS(&CompileConfig{
+		ChrootDir: t.TempDir(),
+		WorkDir:   "work",
+	})
+	if err == nil {
+		t.Fatal("applyCompilerRootFS() should reject relative WorkDir with ChrootDir")
+	}
+	if !strings.Contains(err.Error(), "must be absolute") {
+		t.Fatalf("applyCompilerRootFS() error = %v, want absolute WorkDir error", err)
+	}
+}
+
+func TestDropCompilerCredentialsRejectsMismatchedUIDGID(t *testing.T) {
+	err := dropCompilerCredentials(&CompileConfig{RunUID: 1000, RunGID: -1})
+	if err == nil {
+		t.Fatal("dropCompilerCredentials() should reject mismatched UID/GID")
+	}
+}
+
+func TestHandleRejectsInvalidSandboxConfig(t *testing.T) {
+	if _, err := runner.InitLogger("/dev/null", false); err != nil {
+		t.Fatalf("InitLogger error = %v", err)
+	}
+
+	cfg := &CompileConfig{
+		RunUID: 1000,
+		RunGID: -1, // mismatched: uid set, gid not set
+	}
+
+	result := handle(cfg)
+	if result.Success {
+		t.Fatal("handle() should return Success=false for invalid sandbox config")
 	}
 }

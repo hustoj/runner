@@ -37,6 +37,7 @@ const (
 	childStageSandboxSetgroups
 	childStageSandboxSetgid
 	childStageSandboxSetuid
+	childStageDropCapabilities
 	childStagePtraceTraceme
 	childStagePtraceSync
 	childStageSeccomp
@@ -96,6 +97,8 @@ func (s childStartupStage) String() string {
 		return "setgid"
 	case childStageSandboxSetuid:
 		return "setuid"
+	case childStageDropCapabilities:
+		return "drop capabilities"
 	case childStagePtraceTraceme:
 		return "ptrace traceme"
 	case childStagePtraceSync:
@@ -581,6 +584,9 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 	if failure := applySandboxInChild(spec.sandbox); failure.failed() {
 		reportChildStartupFailure(startupPipeWriteFD, failure.stage, failure.errno)
 	}
+	if errno := dropAllCapabilities(); errno != 0 {
+		reportChildStartupFailure(startupPipeWriteFD, childStageDropCapabilities, errno)
+	}
 	if errno := ptraceTraceme(); errno != 0 {
 		reportChildStartupFailure(startupPipeWriteFD, childStagePtraceTraceme, errno)
 	}
@@ -713,6 +719,74 @@ func rawSetrlimit(resource int, limit *syscall.Rlimit) syscall.Errno {
 
 func rawSetpgid(pid int, pgid int) syscall.Errno {
 	_, _, errno := syscall.RawSyscall(syscall.SYS_SETPGID, uintptr(pid), uintptr(pgid), 0)
+	return errno
+}
+
+// capabilityCount is the upper bound of capability indices representable in the
+// capset ABI (two u32 words = 64 bits). Linux capability numbers are currently
+// well below this bound; iterating up to 64 with EINVAL-tolerance covers future
+// kernels without an ABI bump.
+const capabilityCount = 64
+
+// dropAllCapabilities clears every capability from the bounding set, then
+// clears the effective, permitted, and inheritable sets. It is a no-op for
+// non-root children because setuid has already cleared effective/permitted and
+// non-root cannot drop bounding entries. For root children (the
+// AllowPrivilegedChild path) it provides defense-in-depth before execve: the
+// child retains no privileges and, combined with NoNewPrivs, cannot regain any
+// via setuid binaries or file capabilities.
+//
+// This runs after applySandboxInChild so that sandbox steps which require
+// capabilities (chroot, unshare, setgid, setuid) still see them.
+func dropAllCapabilities() syscall.Errno {
+	if rawGeteuid() != 0 {
+		return 0
+	}
+	// Drop all capabilities from the bounding set first. This requires
+	// CAP_SETPCAP in the effective set; root retains it until we clear
+	// effective/permitted below. PR_CAPBSET_DROP only touches the bounding
+	// set, so CAP_SETPCAP stays effective across these calls.
+	for capability := 0; capability < capabilityCount; capability++ {
+		errno := rawPrctl(unix.PR_CAPBSET_DROP, capability, 0, 0, 0)
+		if errno == syscall.EINVAL {
+			// Capability number not supported on this kernel.
+			continue
+		}
+		if errno != 0 {
+			return errno
+		}
+	}
+	// Clear effective, permitted, and inheritable capability sets.
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	data := [2]unix.CapUserData{}
+	return rawCapset(&header, &data[0])
+}
+
+func rawCapset(header *unix.CapUserHeader, data *unix.CapUserData) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(
+		syscall.SYS_CAPSET,
+		uintptr(unsafe.Pointer(header)),
+		uintptr(unsafe.Pointer(data)),
+		0,
+	)
+	return errno
+}
+
+func rawGeteuid() uintptr {
+	uid, _, _ := syscall.RawSyscall(syscall.SYS_GETEUID, 0, 0, 0)
+	return uid
+}
+
+func rawPrctl(option int, arg2 int, arg3 int, arg4 int, arg5 int) syscall.Errno {
+	_, _, errno := syscall.RawSyscall6(
+		syscall.SYS_PRCTL,
+		uintptr(option),
+		uintptr(arg2),
+		uintptr(arg3),
+		uintptr(arg4),
+		uintptr(arg5),
+		0,
+	)
 	return errno
 }
 

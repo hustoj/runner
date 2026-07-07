@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,8 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
-	runWithTempCaseJSON(t, `{"UseNetNS":true,"RunUID":-1,"RunGID":-1}`, func() {
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
+	runWithTempCaseJSON(t, `{"UseNetNS":true,"RunUID":-1,"RunGID":-1,"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 
 		cfg, err := LoadConfig()
@@ -20,11 +22,14 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		warnings := cfg.ValidationWarnings()
-		if len(warnings) != 1 {
-			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
+		if len(warnings) != 2 {
+			t.Fatalf("ValidationWarnings() len = %d, want 2", len(warnings))
 		}
 		if warnings[0] != namespacePrivilegeWarning {
-			t.Fatalf("ValidationWarnings() = %q, want %q", warnings[0], namespacePrivilegeWarning)
+			t.Fatalf("ValidationWarnings()[0] = %q, want %q", warnings[0], namespacePrivilegeWarning)
+		}
+		if warnings[1] != privilegedChildWarning {
+			t.Fatalf("ValidationWarnings()[1] = %q, want %q", warnings[1], privilegedChildWarning)
 		}
 	})
 }
@@ -50,7 +55,11 @@ func TestLoadConfigInvalidConfigurationReturnsErrorWithoutLogger(t *testing.T) {
 	})
 }
 
-func TestLoadConfigRejectsRootWithoutPrivilegeDrop(t *testing.T) {
+func TestLoadConfigRejectsRootWithoutPrivilegeDropOrOptIn(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime security checks are linux-only")
+	}
+
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 	effectiveUID = func() int { return 0 }
@@ -60,14 +69,14 @@ func TestLoadConfigRejectsRootWithoutPrivilegeDrop(t *testing.T) {
 
 		_, err := LoadConfig()
 		if err == nil {
-			t.Fatal("LoadConfig() error = nil, want root privilege-drop rejection")
+			t.Fatal("LoadConfig() error = nil, want privileged child opt-in rejection")
 		}
 		message := err.Error()
 		if !strings.Contains(message, "unsafe configuration") {
 			t.Fatalf("error = %q, want unsafe configuration message", message)
 		}
-		if !strings.Contains(message, rootPrivilegeDropRequiredError) {
-			t.Fatalf("error = %q, want %q", message, rootPrivilegeDropRequiredError)
+		if !strings.Contains(message, privilegedChildOptInRequiredError) {
+			t.Fatalf("error = %q, want %q", message, privilegedChildOptInRequiredError)
 		}
 	})
 }
@@ -90,7 +99,11 @@ func TestLoadConfigAllowsRootWithNonRootPrivilegeDrop(t *testing.T) {
 	})
 }
 
-func TestValidateLaunchSafetyRejectsRootTargetCredentials(t *testing.T) {
+func TestValidateLaunchSafetyRejectsRootTargetCredentialsWithoutOptIn(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime security checks are linux-only")
+	}
+
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 	effectiveUID = func() int { return 0 }
@@ -111,10 +124,10 @@ func TestValidateLaunchSafetyRejectsRootTargetCredentials(t *testing.T) {
 			cfg := &TaskConfig{RunUID: tt.uid, RunGID: tt.gid}
 			err := cfg.ValidateLaunchSafety()
 			if err == nil {
-				t.Fatal("ValidateLaunchSafety() error = nil, want root privilege-drop rejection")
+				t.Fatal("ValidateLaunchSafety() error = nil, want privileged child opt-in rejection")
 			}
-			if !strings.Contains(err.Error(), rootPrivilegeDropRequiredError) {
-				t.Fatalf("ValidateLaunchSafety() error = %q, want %q", err, rootPrivilegeDropRequiredError)
+			if !strings.Contains(err.Error(), privilegedChildOptInRequiredError) {
+				t.Fatalf("ValidateLaunchSafety() error = %q, want %q", err, privilegedChildOptInRequiredError)
 			}
 		})
 	}
@@ -159,7 +172,8 @@ func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 
-	runWithTempCaseJSON(t, `{"MemoryReserve":32}`, func() {
+	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
+	runWithTempCaseJSON(t, `{"MemoryReserve":32,"AllowPrivilegedChild":true}`, func() {
 		SetLogger(nil)
 
 		cfg, err := LoadConfig()
@@ -167,13 +181,23 @@ func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		warnings := cfg.ValidationWarnings()
-		if len(warnings) != 1 {
-			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
+		if len(warnings) != 2 {
+			t.Fatalf("ValidationWarnings() len = %d, want 2", len(warnings))
 		}
 		if warnings[0] != memoryReserveDeprecatedWarning {
-			t.Fatalf("ValidationWarnings() = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
+			t.Fatalf("ValidationWarnings()[0] = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
+		}
+		if warnings[1] != privilegedChildWarning {
+			t.Fatalf("ValidationWarnings()[1] = %q, want %q", warnings[1], privilegedChildWarning)
 		}
 	})
+}
+
+func TestValidationWarningsEmptyForSafeConfig(t *testing.T) {
+	cfg := &TaskConfig{RunUID: -1, RunGID: -1}
+	if warnings := cfg.ValidationWarnings(); len(warnings) != 0 {
+		t.Fatalf("ValidationWarnings() = %v, want empty for safe config", warnings)
+	}
 }
 
 func TestSyscallBackendDefaultsToPtrace(t *testing.T) {

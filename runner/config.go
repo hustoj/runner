@@ -21,8 +21,9 @@ type TaskConfig struct {
 	MaxProcs      int `default:"16"`  // Max number of processes/threads per task cgroup (Linux cgroup v2 pids.max)
 
 	// Sandbox security settings
-	RunUID int `default:"-1"` // UID to run as (-1 = no privilege drop)
-	RunGID int `default:"-1"` // GID to run as (-1 = no privilege drop)
+	RunUID               int  `default:"-1"`    // UID to run as (-1 = no privilege drop)
+	RunGID               int  `default:"-1"`    // GID to run as (-1 = no privilege drop)
+	AllowPrivilegedChild bool `default:"false"` // Explicitly allow a root child (RunUID/RunGID unset or 0) on Linux
 
 	Command   string   `default:"./main"`
 	Args      []string `default:""` // Explicit arguments; takes precedence over parsing Command
@@ -55,11 +56,13 @@ type TaskConfig struct {
 
 var effectiveUID = os.Geteuid
 
-const rootPrivilegeDropRequiredError = "refusing to run as root without explicit non-root RunUID/RunGID privilege drop"
+const privilegedChildOptInRequiredError = "running as root without dropping to unprivileged RunUID/RunGID requires AllowPrivilegedChild=true"
 
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
 
 const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
+
+const privilegedChildWarning = "AllowPrivilegedChild is set: child will run as root without chroot/namespace isolation (high-risk mode)"
 
 const (
 	syscallBackendPtrace = "ptrace"
@@ -125,17 +128,7 @@ func (tc *TaskConfig) Validate() error {
 
 // ValidateLaunchSafety checks runtime safety constraints that depend on the current process identity.
 func (tc *TaskConfig) ValidateLaunchSafety() error {
-	if effectiveUID() != 0 {
-		return nil
-	}
-	if tc.hasExplicitNonRootCredentialDrop() {
-		return nil
-	}
-	return errors.New(rootPrivilegeDropRequiredError)
-}
-
-func (tc *TaskConfig) hasExplicitNonRootCredentialDrop() bool {
-	return tc.RunUID > 0 && tc.RunGID > 0
+	return tc.validateRuntimeSecurity(effectiveUID())
 }
 
 // ValidationWarnings returns non-fatal configuration diagnostics.
@@ -148,6 +141,10 @@ func (tc *TaskConfig) ValidationWarnings() []string {
 
 	if tc.MemoryReserve > 0 {
 		warnings = append(warnings, memoryReserveDeprecatedWarning)
+	}
+
+	if tc.AllowPrivilegedChild {
+		warnings = append(warnings, privilegedChildWarning)
 	}
 
 	if len(warnings) == 0 {
@@ -166,6 +163,10 @@ func (tc *TaskConfig) LogValidationWarnings() {
 
 		fmt.Fprintf(os.Stderr, "WARN: %s\n", warning)
 	}
+}
+
+func (tc *TaskConfig) validateRuntimeSecurity(euid int) error {
+	return validateRuntimeSecurityForPlatform(tc, euid)
 }
 
 func (tc *TaskConfig) effectiveSyscallBackend() string {

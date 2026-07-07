@@ -56,6 +56,9 @@ func (tracer *TracerDetect) checkSyscall(pid int) syscallCheckResult {
 			log.Infof("not allowed syscall %d: %16v ", callID, getName(callID))
 			return syscallCheckViolation
 		}
+		if !tracer.checkSyscallArguments(callID, &regs) {
+			return syscallCheckViolation
+		}
 		tracer.auditSyscall(pid, callID, "ptrace")
 		if callID != syscall.SYS_WRITE && callID != syscall.SYS_READ {
 			log.Info(getName(callID))
@@ -100,8 +103,22 @@ func (tracer *TracerDetect) checkSeccompTrace(pid int) syscallCheckResult {
 		log.Infof("not allowed seccomp-traced syscall %d: %16v ", callID, getName(callID))
 		return syscallCheckViolation
 	}
+	if !tracer.checkSyscallArguments(callID, &regs) {
+		return syscallCheckViolation
+	}
 	tracer.auditSyscall(pid, callID, "seccomp")
 	return syscallCheckOK
+}
+
+func (tracer *TracerDetect) checkSyscallArguments(callID uint64, regs *syscall.PtraceRegs) bool {
+	if callID != uint64(syscall.SYS_PRLIMIT64) {
+		return true
+	}
+	if getSyscallArgument(regs, 2) == 0 {
+		return true
+	}
+	log.Infof("not allowed prlimit64 set operation")
+	return false
 }
 
 func (tracer *TracerDetect) auditSyscall(pid int, callID uint64, source string) {

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,7 +28,11 @@ func waitStatusForExit(t *testing.T, code int) syscall.WaitStatus {
 	return status
 }
 
-func TestRunRejectsRootWithoutPrivilegeDropBeforeStartingChild(t *testing.T) {
+func TestRunRejectsRootWithoutPrivilegeDropOrOptInBeforeStartingChild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime security checks are linux-only")
+	}
+
 	restoreGlobals := preserveConfigTestGlobals()
 	defer restoreGlobals()
 	effectiveUID = func() int { return 0 }
@@ -36,10 +41,10 @@ func TestRunRejectsRootWithoutPrivilegeDropBeforeStartingChild(t *testing.T) {
 
 	err := task.Run()
 	if err == nil {
-		t.Fatal("Run() error = nil, want root privilege-drop rejection")
+		t.Fatal("Run() error = nil, want privileged child opt-in rejection")
 	}
-	if !strings.Contains(err.Error(), rootPrivilegeDropRequiredError) {
-		t.Fatalf("Run() error = %q, want %q", err, rootPrivilegeDropRequiredError)
+	if !strings.Contains(err.Error(), privilegedChildOptInRequiredError) {
+		t.Fatalf("Run() error = %q, want %q", err, privilegedChildOptInRequiredError)
 	}
 	if task.process != nil {
 		t.Fatalf("Run() started child process despite unsafe configuration: %#v", task.process)

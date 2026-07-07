@@ -107,6 +107,28 @@ func TestRunProcessPropagatesSandboxPermissionFailures(t *testing.T) {
 	})
 }
 
+func TestRunProcessDropsAllCapabilitiesBeforeTraceLoop(t *testing.T) {
+	requireSandboxRoot(t)
+
+	runInSandboxWorkspace(t, func(_ string) {
+		task, cleanup, err := startSandboxedTask(t, sandboxRunProcessConfig("/bin/true"))
+		if err != nil {
+			t.Fatalf("runProcess() error = %v", err)
+		}
+		defer cleanup()
+
+		status, err := readProcStatusFields(task.process.Pid, "CapEff", "CapPrm", "CapInh", "CapBnd")
+		if err != nil {
+			t.Fatalf("readProcStatusFields(capabilities) error = %v", err)
+		}
+		for _, field := range []string{"CapEff", "CapPrm", "CapInh", "CapBnd"} {
+			if firstField(status[field]) != "0" {
+				t.Fatalf("%s = %v, want 0 (all capabilities dropped)", field, status[field])
+			}
+		}
+	})
+}
+
 func TestRunProcessSetsCredentialsBeforeTraceLoop(t *testing.T) {
 	requireSandboxRoot(t)
 

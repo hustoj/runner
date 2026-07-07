@@ -88,6 +88,19 @@ func TestEffectiveSyscallPolicyDenyOverridesLegacyAndStructuredAllow(t *testing.
 	}
 }
 
+func TestHybridPolicyTracesArgumentFilteredAllowedCalls(t *testing.T) {
+	cfg := &TaskConfig{
+		OneTimeCalls: []string{"execve"},
+		AllowedCalls: []string{"read", "prlimit64"},
+	}
+
+	policy := cfg.effectiveSyscallPolicy()
+
+	assertStringSliceEqual(t, policy.ptraceAllowedCalls(), []string{"read", "prlimit64"})
+	assertStringSliceEqual(t, policy.seccompAllowedCalls(), []string{"read"})
+	assertStringSliceEqual(t, policy.seccompTracedCalls(), []string{"execve", "prlimit64"})
+}
+
 func TestCompileSyscallPolicyProducesBackendInputs(t *testing.T) {
 	cfg := &TaskConfig{
 		CPU:           1,

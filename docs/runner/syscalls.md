@@ -10,7 +10,9 @@
 > `SyscallPolicy.Audit`, use `SECCOMP_RET_TRACE`, so ptrace remains the startup
 > boundary and named audit path instead of permanently allowing one-time calls.
 > Hybrid uses event-only ptrace resume for performance, so ordinary seccomp
-> `ALLOW` calls do not produce ptrace syscall enter/exit stops.
+> `ALLOW` calls do not produce ptrace syscall enter/exit stops. Syscalls that
+> require argument filtering, currently `prlimit64`, are compiled as seccomp
+> `TRACE` even when they come from the runtime allowlist.
 
 ## Default allowed syscalls (runtime-supported Linux platforms)
 
@@ -23,6 +25,11 @@ readlinkat, faccessat,
 mprotect, set_tid_address, set_robust_list,
 rseq, prlimit64, getrandom, rt_sigreturn
 ```
+
+`prlimit64` is query-only: calls with `new_rlim == NULL` are allowed, while
+SET operations (`new_rlim != NULL`) are rejected before execution. Do not add a
+broad `prlimit64` SET exception for language runtimes; if a runtime attempts to
+raise a non-output limit, prefer a runtime flag that disables that behavior.
 
 ### One-time calls (default)
 
@@ -90,3 +97,9 @@ versions or architectures may require adjustments.
 The syscall list alone is not sufficient for current OpenJDK builds. The JVM
 also creates more than the default `MaxProcs: 16` threads during startup, so
 the Java fixture raises `MaxProcs` explicitly.
+
+OpenJDK 21 may also try to raise the soft `RLIMIT_NOFILE` to the hard limit via
+`prlimit64(SET)` during startup. The runner intentionally keeps `prlimit64`
+SET blocked so user programs cannot widen protected limits such as
+`RLIMIT_FSIZE`; Java fixtures should pass `-XX:-MaxFDLimit` instead of relying
+on a sandbox-side exception.

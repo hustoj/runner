@@ -207,6 +207,21 @@ func TestCloseNonStdioFilesExceptStartupPipe(t *testing.T) {
 	}
 }
 
+func TestChildStageDropCapabilitiesString(t *testing.T) {
+	if got := childStageDropCapabilities.String(); got != "drop capabilities" {
+		t.Fatalf("childStageDropCapabilities.String() = %q", got)
+	}
+}
+
+func TestDropAllCapabilitiesNoopsForNonRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to verify no-op short-circuit")
+	}
+	if errno := dropAllCapabilities(); errno != 0 {
+		t.Fatalf("dropAllCapabilities() = %v, want 0 for non-root", errno)
+	}
+}
+
 func TestTraceResumeModeUsesEventStopsForHybridOnly(t *testing.T) {
 	defaultTask := RunningTask{setting: &TaskConfig{}}
 	if got := defaultTask.traceResumeMode(); got != traceResumeSyscallStops {

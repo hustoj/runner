@@ -65,19 +65,41 @@ func TestCloseNonStdioFiles(t *testing.T) {
 		}
 		os.Exit(0)
 	}
+	if os.Getenv("TEST_CLOSE_FDS_FALLBACK") == "1" {
+		f, err := os.Open("/dev/null")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "open: %v", err)
+			os.Exit(2)
+		}
+		fd := int(f.Fd())
+		if fd <= 2 {
+			os.Exit(3)
+		}
+		if err := closeNonStdioFilesUpTo(uint64(fd + 1)); err != nil {
+			fmt.Fprintf(os.Stderr, "close fallback: %v", err)
+			os.Exit(4)
+		}
+		var stat syscall.Stat_t
+		if syscall.Fstat(fd, &stat) == nil {
+			os.Exit(5)
+		}
+		os.Exit(0)
+	}
 
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable() error = %v", err)
 	}
 
-	cmd := &exec.Cmd{
-		Path: self,
-		Args: []string{self, "-test.run=^TestCloseNonStdioFiles$"},
-		Env:  append(os.Environ(), "TEST_CLOSE_FDS=1"),
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("CloseNonStdioFiles subprocess failed: %v\noutput: %s", err, out)
+	for _, envKey := range []string{"TEST_CLOSE_FDS=1", "TEST_CLOSE_FDS_FALLBACK=1"} {
+		cmd := &exec.Cmd{
+			Path: self,
+			Args: []string{self, "-test.run=^TestCloseNonStdioFiles$"},
+			Env:  append(os.Environ(), envKey),
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("CloseNonStdioFiles subprocess %s failed: %v\noutput: %s", envKey, err, out)
+		}
 	}
 }

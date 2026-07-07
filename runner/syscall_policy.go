@@ -28,6 +28,10 @@ type compiledSyscallPolicy struct {
 // the seccomp filter to report execve failures and exit cleanly.
 var postSeccompStartupCalls = []string{"write", "close", "exit", "exit_group"}
 
+// argumentFilteredCalls need ptrace argument inspection even when they are part
+// of the runtime allowlist, so hybrid seccomp must TRACE rather than ALLOW them.
+var argumentFilteredCalls = []string{"prlimit64"}
+
 func (tc *TaskConfig) effectiveSyscallPolicy() EffectiveSyscallPolicy {
 	allow := make([]string, 0, len(tc.AllowedCalls)+len(tc.AdditionCalls)+len(tc.SyscallPolicy.Allow))
 	allow = append(allow, tc.AllowedCalls...)
@@ -94,15 +98,26 @@ func (policy EffectiveSyscallPolicy) ptraceAllowedCalls() []string {
 }
 
 func (policy EffectiveSyscallPolicy) seccompAllowedCalls() []string {
-	return append([]string(nil), policy.Allow...)
+	return removeSyscallNames(policy.Allow, argumentFilteredCalls)
 }
 
 func (policy EffectiveSyscallPolicy) seccompTracedCalls() []string {
-	traced := make([]string, 0, len(policy.OneTime)+len(policy.Trace)+len(policy.Audit))
+	traced := make([]string, 0, len(policy.OneTime)+len(policy.Trace)+len(policy.Audit)+len(argumentFilteredCalls))
 	traced = append(traced, policy.OneTime...)
 	traced = append(traced, policy.Trace...)
 	traced = append(traced, policy.Audit...)
+	traced = append(traced, allowedArgumentFilteredCalls(policy.Allow)...)
 	return uniqueSyscallNames(traced)
+}
+
+func allowedArgumentFilteredCalls(allowed []string) []string {
+	filtered := make([]string, 0, len(argumentFilteredCalls))
+	for _, call := range argumentFilteredCalls {
+		if containsSyscallName(allowed, call) {
+			filtered = append(filtered, call)
+		}
+	}
+	return filtered
 }
 
 func validateSyscallPolicyOwnership(policy EffectiveSyscallPolicy) error {

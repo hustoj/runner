@@ -12,6 +12,10 @@ type RunResult struct {
 
 func main() {
 	if isCompilerBootstrapProcess() {
+		if err := awaitCompilerCgroupGate(); err != nil {
+			fmt.Fprintf(os.Stderr, "compiler: await cgroup gate: %v\n", err)
+			os.Exit(1)
+		}
 		m, err := loadBootstrapConfig()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "compiler: load bootstrap config: %v\n", err)

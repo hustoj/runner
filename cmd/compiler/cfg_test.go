@@ -114,6 +114,18 @@ func TestLoadConfigKeepsDefaultArgsWhenArgsOmitted(t *testing.T) {
 	})
 }
 
+func TestLoadConfigDefaultsToSafeCompilerSandbox(t *testing.T) {
+	runWithTempCompileJSON(t, `{"command":"gcc"}`, func(compilePath string) {
+		cfg := loadConfigWithLoader(t, compilePath, nil)
+		if !cfg.NoNewPrivs {
+			t.Fatal("NoNewPrivs default = false, want true")
+		}
+		if cfg.MaxProcs != 32 {
+			t.Fatalf("MaxProcs default = %d, want 32", cfg.MaxProcs)
+		}
+	})
+}
+
 func TestLoadConfigFallsBackToCommandSplitWhenArgsIsNull(t *testing.T) {
 	runWithTempCompileJSON(t, `{"command":"sh -c 'printf ok'","args":null}`, func(compilePath string) {
 		cfg := loadConfigWithLoader(t, compilePath, nil)
@@ -202,6 +214,8 @@ func TestLoadConfigRejectsInvalidArgsJSONType(t *testing.T) {
 }
 
 func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
 	tests := []struct {
 		name    string
 		uid     int
@@ -219,7 +233,7 @@ func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &CompileConfig{RunUID: tt.uid, RunGID: tt.gid}
+			cfg := &CompileConfig{RunUID: tt.uid, RunGID: tt.gid, MaxProcs: 32}
 			err := cfg.ValidateSandbox()
 			if tt.wantErr && err == nil {
 				t.Fatal("ValidateSandbox() should return error")
@@ -232,9 +246,12 @@ func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
 }
 
 func TestValidateSandboxRejectsNonexistentChrootDir(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
 	cfg := &CompileConfig{
 		RunUID:    -1,
 		RunGID:    -1,
+		MaxProcs:  32,
 		ChrootDir: "/nonexistent/chroot/dir/12345",
 	}
 
@@ -245,6 +262,8 @@ func TestValidateSandboxRejectsNonexistentChrootDir(t *testing.T) {
 }
 
 func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
 	tmpFile := filepath.Join(t.TempDir(), "not_a_dir")
 	if err := os.WriteFile(tmpFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("write temp file: %v", err)
@@ -253,6 +272,7 @@ func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
 	cfg := &CompileConfig{
 		RunUID:    -1,
 		RunGID:    -1,
+		MaxProcs:  32,
 		ChrootDir: tmpFile,
 	}
 
@@ -263,9 +283,12 @@ func TestValidateSandboxRejectsChrootDirNotDirectory(t *testing.T) {
 }
 
 func TestValidateSandboxAcceptsValidChrootDir(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
 	cfg := &CompileConfig{
 		RunUID:    -1,
 		RunGID:    -1,
+		MaxProcs:  32,
 		ChrootDir: t.TempDir(),
 	}
 
@@ -275,15 +298,45 @@ func TestValidateSandboxAcceptsValidChrootDir(t *testing.T) {
 }
 
 func TestValidateSandboxRejectsRelativeWorkDirWithChroot(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
 	cfg := &CompileConfig{
 		RunUID:    -1,
 		RunGID:    -1,
+		MaxProcs:  32,
 		ChrootDir: t.TempDir(),
 		WorkDir:   "work",
 	}
 
 	if err := cfg.ValidateSandbox(); err == nil {
 		t.Fatal("ValidateSandbox() should reject relative WorkDir with ChrootDir")
+	}
+}
+
+func TestValidateSandboxRejectsRootWithoutCredentialDrop(t *testing.T) {
+	withCompilerEffectiveUID(t, 0)
+
+	cfg := &CompileConfig{RunUID: -1, RunGID: -1, MaxProcs: 32}
+	if err := cfg.ValidateSandbox(); err == nil {
+		t.Fatal("ValidateSandbox() should reject root compiler without RunUID/RunGID")
+	}
+}
+
+func TestValidateSandboxAllowsRootWithCredentialDrop(t *testing.T) {
+	withCompilerEffectiveUID(t, 0)
+
+	cfg := &CompileConfig{RunUID: 1536, RunGID: 1536, MaxProcs: 32}
+	if err := cfg.ValidateSandbox(); err != nil {
+		t.Fatalf("ValidateSandbox() error = %v, want nil", err)
+	}
+}
+
+func TestValidateSandboxRejectsInvalidMaxProcs(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
+	cfg := &CompileConfig{RunUID: -1, RunGID: -1, MaxProcs: 0}
+	if err := cfg.ValidateSandbox(); err == nil {
+		t.Fatal("ValidateSandbox() should reject MaxProcs < 1")
 	}
 }
 
@@ -363,6 +416,7 @@ func TestBootstrapConfigRoundTripPreservesFields(t *testing.T) {
 		Memory:     256,
 		Output:     32,
 		Stack:      16,
+		MaxProcs:   64,
 		Command:    "g++",
 		Verbose:    true,
 		LogPath:    "/tmp/compiler.log",
@@ -389,8 +443,8 @@ func TestBootstrapConfigRoundTripPreservesFields(t *testing.T) {
 		t.Fatalf("loadBootstrapConfig() error = %v", err)
 	}
 
-	if got.CPU != 5 || got.Memory != 256 || got.Output != 32 || got.Stack != 16 {
-		t.Fatalf("resource fields = cpu:%d memory:%d output:%d stack:%d", got.CPU, got.Memory, got.Output, got.Stack)
+	if got.CPU != 5 || got.Memory != 256 || got.Output != 32 || got.Stack != 16 || got.MaxProcs != 64 {
+		t.Fatalf("resource fields = cpu:%d memory:%d output:%d stack:%d maxProcs:%d", got.CPU, got.Memory, got.Output, got.Stack, got.MaxProcs)
 	}
 	if got.Command != "g++" || !got.Verbose || got.LogPath != "/tmp/compiler.log" {
 		t.Fatalf("basic fields = command:%q verbose:%v logPath:%q", got.Command, got.Verbose, got.LogPath)
@@ -433,6 +487,16 @@ func loadConfigWithLoader(t *testing.T, compilePath string, flagArgs []string) *
 		t.Fatalf("loader.Load() error = %v", err)
 	}
 	return cfg
+}
+
+func withCompilerEffectiveUID(t *testing.T, euid int) {
+	t.Helper()
+
+	previous := compilerEffectiveUID
+	compilerEffectiveUID = func() int { return euid }
+	t.Cleanup(func() {
+		compilerEffectiveUID = previous
+	})
 }
 
 func runWithTempCompileJSON(t *testing.T, content string, fn func(compilePath string)) {

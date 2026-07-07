@@ -22,6 +22,10 @@ func isCompilerBootstrapProcess() bool {
 	return os.Getenv(compilerBootstrapEnv) == "1"
 }
 
+func awaitCompilerCgroupGate() error {
+	return nil
+}
+
 func bootstrapCompile(_ *CompileConfig) {
 	fmt.Fprintln(os.Stderr, compilerDarwinUnavailable("bootstrapCompile"))
 	os.Exit(1)

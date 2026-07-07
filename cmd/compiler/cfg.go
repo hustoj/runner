@@ -80,22 +80,24 @@ func parseCompileArgsValue(value string) ([]string, error) {
 }
 
 type CompileConfig struct {
-	CPU     int          `default:"3"`
-	Memory  int          `default:"128"`
-	Output  int          `default:"16"`
-	Stack   int          `default:"8"`
-	Command string       `default:"gcc"`
-	Verbose bool         `default:"false"`
-	LogPath string       `default:""`
-	Args    *CompileArgs `default:"main.c -o main -O2 -fmax-errors=10 -Wall --static -lm --std=c99"`
+	CPU      int          `default:"3"`
+	Memory   int          `default:"128"`
+	Output   int          `default:"16"`
+	Stack    int          `default:"8"`
+	MaxProcs int          `default:"32"`
+	Command  string       `default:"gcc"`
+	Verbose  bool         `default:"false"`
+	LogPath  string       `default:""`
+	Args     *CompileArgs `default:"main.c -o main -O2 -fmax-errors=10 -Wall --static -lm --std=c99"`
 
 	// Sandbox security settings for the compiler child process.
 	// When RunUID/RunGID are both -1 (default), no privilege drop is applied.
+	// Root launchers must configure a positive RunUID/RunGID pair instead.
 	RunUID     int    `default:"-1"`    // Target UID (-1 = no privilege drop)
 	RunGID     int    `default:"-1"`    // Target GID (-1 = no privilege drop)
 	ChrootDir  string `default:""`      // Chroot jail directory (empty = no chroot)
 	WorkDir    string `default:""`      // Working directory inside chroot (empty = /; must be absolute with chroot)
-	NoNewPrivs bool   `default:"false"` // Set PR_SET_NO_NEW_PRIVS before exec
+	NoNewPrivs bool   `default:"true"`  // Set PR_SET_NO_NEW_PRIVS before exec
 	UseMountNS bool   `default:"false"` // Isolate mount points
 	UseIPCNS   bool   `default:"false"` // Isolate IPC resources
 	UseUTSNS   bool   `default:"false"` // Isolate hostname/domainname
@@ -104,6 +106,10 @@ type CompileConfig struct {
 	commands []string
 	parseErr error
 }
+
+var compilerEffectiveUID = os.Geteuid
+
+const compilerPrivilegedChildRequiredError = "running compiler as root without dropping to unprivileged RunUID/RunGID is unsafe"
 
 func encodeBootstrapConfig(config *CompileConfig) (string, error) {
 	data, err := json.Marshal(config)
@@ -191,10 +197,16 @@ func loadConfig() *CompileConfig {
 // UID/GID <= 0 means no privilege drop; both must be > 0 to drop.
 // ChrootDir must exist as a directory if set.
 func (config *CompileConfig) ValidateSandbox() error {
+	if err := config.validateResourceLimits(); err != nil {
+		return err
+	}
 	uidSet := config.RunUID > 0
 	gidSet := config.RunGID > 0
 	if uidSet != gidSet {
 		return fmt.Errorf("runUID and runGID must both be positive or both be <= 0 (got uid=%d, gid=%d)", config.RunUID, config.RunGID)
+	}
+	if err := config.ValidateLaunchSafety(); err != nil {
+		return err
 	}
 	if config.ChrootDir != "" {
 		info, err := os.Stat(config.ChrootDir)
@@ -209,6 +221,35 @@ func (config *CompileConfig) ValidateSandbox() error {
 		return err
 	}
 	return nil
+}
+
+func (config *CompileConfig) validateResourceLimits() error {
+	if config.CPU < 0 {
+		return fmt.Errorf("cpu must be >= 0 (got %d)", config.CPU)
+	}
+	if config.Memory < 0 {
+		return fmt.Errorf("memory must be >= 0 (got %d)", config.Memory)
+	}
+	if config.Output < 0 {
+		return fmt.Errorf("output must be >= 0 (got %d)", config.Output)
+	}
+	if config.Stack < 0 {
+		return fmt.Errorf("stack must be >= 0 (got %d)", config.Stack)
+	}
+	if config.MaxProcs < 1 {
+		return fmt.Errorf("maxProcs must be >= 1 so the compiler can start (got %d)", config.MaxProcs)
+	}
+	return nil
+}
+
+func (config *CompileConfig) ValidateLaunchSafety() error {
+	if compilerEffectiveUID() != 0 {
+		return nil
+	}
+	if config.RunUID > 0 && config.RunGID > 0 {
+		return nil
+	}
+	return errors.New(compilerPrivilegedChildRequiredError)
 }
 
 func (config *CompileConfig) sandboxWorkDir() (string, error) {

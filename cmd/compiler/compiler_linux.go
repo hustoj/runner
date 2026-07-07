@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
@@ -17,6 +19,7 @@ import (
 var log *zap.SugaredLogger
 
 const compilerBootstrapEnv = "RUNNER_COMPILER_BOOTSTRAP"
+const compilerCgroupGateFDEnv = "RUNNER_COMPILER_CGROUP_GATE_FD"
 
 const (
 	compileExitDupFailure   = 124
@@ -24,7 +27,15 @@ const (
 	compileExitExecFailure  = 126
 )
 
-var compilerSetitimer = unix.Setitimer
+var (
+	compilerSetitimer             = unix.Setitimer
+	compilerWait4                 = syscall.Wait4
+	compilerKillGraceTimeout      = 2 * time.Second
+	startCompilerBootstrapProcess = startCompileBootstrapProcess
+	newCompilerTaskController     = func(cfg *CompileConfig) (runner.TaskController, error) {
+		return runner.NewCgroupTaskController(cfg.Memory, cfg.MaxProcs)
+	}
+)
 
 func setNoNewPrivs() syscall.Errno {
 	_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(runner.PrSetNoNewPrivs), 1, 0, 0, 0, 0)
@@ -65,9 +76,6 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(unix.RLIMIT_NPROC, &syscall.Rlimit{Max: 32, Cur: 32}); err != nil {
-		return err
-	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Max: 64, Cur: 64}); err != nil {
 		return err
 	}
@@ -79,9 +87,20 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 
 func setCompileAlarm(cpu uint64) error {
 	_, err := compilerSetitimer(unix.ITIMER_REAL, unix.Itimerval{
-		Value: unix.Timeval{Sec: int64(cpu*3 + 2)},
+		Value: unix.Timeval{Sec: int64(compilerWallClockTimeoutSeconds(int(cpu)))},
 	})
 	return err
+}
+
+func compilerWallClockTimeout(cpu int) time.Duration {
+	return time.Duration(compilerWallClockTimeoutSeconds(cpu)) * time.Second
+}
+
+func compilerWallClockTimeoutSeconds(cpu int) int {
+	if cpu < 0 {
+		return 2
+	}
+	return cpu*3 + 2
 }
 
 func doCompile(cfg *CompileConfig) error {
@@ -186,6 +205,9 @@ func dropCompilerCredentials(cfg *CompileConfig) error {
 	if uidSet != gidSet {
 		return fmt.Errorf("compiler uid/gid must be configured together (got uid=%d, gid=%d)", cfg.RunUID, cfg.RunGID)
 	}
+	if os.Geteuid() == cfg.RunUID && os.Getegid() == cfg.RunGID {
+		return nil
+	}
 	if err := syscall.Setgroups(nil); err != nil {
 		return fmt.Errorf("clear supplementary groups: %w", err)
 	}
@@ -198,15 +220,76 @@ func dropCompilerCredentials(cfg *CompileConfig) error {
 	return nil
 }
 
-func startCompileBootstrapProcess(cfg *CompileConfig) (int, error) {
+func startCompileBootstrapProcess(cfg *CompileConfig, gateReader *os.File) (int, error) {
 	encodedConfig, err := encodeBootstrapConfig(cfg)
 	if err != nil {
 		return 0, fmt.Errorf("encode bootstrap config: %w", err)
 	}
-	return runner.StartBootstrapChildWithEnv(compilerBootstrapEnv, []string{compilerBootstrapConfigEnv + "=" + encodedConfig})
+	self, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+
+	env := append(runner.BuildMinimalEnv(compilerBootstrapEnv, compilerBootstrapConfigEnv, compilerCgroupGateFDEnv), compilerBootstrapEnv+"=1", compilerBootstrapConfigEnv+"="+encodedConfig)
+	files := []*os.File{os.Stdin, os.Stdout, os.Stderr}
+	if gateReader != nil {
+		env = append(env, compilerCgroupGateFDEnv+"=3")
+		files = append(files, gateReader)
+	}
+
+	proc, err := os.StartProcess(self, []string{self}, &os.ProcAttr{
+		Env:   env,
+		Files: files,
+		Sys:   &syscall.SysProcAttr{Setpgid: true},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return proc.Pid, nil
+}
+
+func awaitCompilerCgroupGate() error {
+	fdValue := os.Getenv(compilerCgroupGateFDEnv)
+	if fdValue == "" {
+		return nil
+	}
+	fd, err := strconv.Atoi(fdValue)
+	if err != nil {
+		return fmt.Errorf("parse %s=%q: %w", compilerCgroupGateFDEnv, fdValue, err)
+	}
+	file := os.NewFile(uintptr(fd), "compiler-cgroup-gate")
+	if file == nil {
+		return fmt.Errorf("open cgroup gate fd %d", fd)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	gate := []byte{0}
+	if _, err := file.Read(gate); err != nil {
+		return fmt.Errorf("read cgroup gate: %w", err)
+	}
+	if gate[0] != 1 {
+		return fmt.Errorf("invalid cgroup gate byte %d", gate[0])
+	}
+	return nil
+}
+
+func releaseCompilerCgroupGate(gateWriter *os.File) error {
+	defer func() {
+		_ = gateWriter.Close()
+	}()
+	if _, err := gateWriter.Write([]byte{1}); err != nil {
+		return fmt.Errorf("write compiler cgroup gate: %w", err)
+	}
+	return nil
 }
 
 func bootstrapCompile(cfg *CompileConfig) {
+	if err := cfg.ValidateSandbox(); err != nil {
+		fmt.Fprintf(os.Stderr, "compile bootstrap rejected unsafe config: %v\n", err)
+		syscall.Exit(compileExitSetupFailure)
+	}
 	if err := doCompile(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "compile bootstrap failed: %v\n", err)
 		syscall.Exit(1)
@@ -246,17 +329,54 @@ func handle(cfg *CompileConfig) *RunResult {
 		return &RunResult{Success: false}
 	}
 
-	var status syscall.WaitStatus
-	pid, err := startCompileBootstrapProcess(cfg)
+	controller, err := newCompilerTaskController(cfg)
+	if err != nil {
+		warnf("setup compiler task cgroup failed: %v", err)
+		return &RunResult{Success: false}
+	}
+
+	pid := 0
+	defer func() {
+		cleanupCompilerTaskController(pid, controller)
+	}()
+
+	gateReader, gateWriter, err := os.Pipe()
+	if err != nil {
+		warnf("create compiler cgroup gate failed: %v", err)
+		return &RunResult{Success: false}
+	}
+	defer func() {
+		_ = gateReader.Close()
+		_ = gateWriter.Close()
+	}()
+
+	pid, err = startCompilerBootstrapProcess(cfg, gateReader)
+	_ = gateReader.Close()
 	if err != nil {
 		warnf("start compile bootstrap failed: %v", err)
 		return &RunResult{Success: false}
 	}
 	infof("Child Pid is: %d", pid)
 
-	result := RunResult{Success: false}
+	if err := controller.MovePID(pid); err != nil {
+		warnf("move compiler child %d into task cgroup failed: %v", pid, err)
+		killCompilerProcessTree(pid, nil)
+		waitCompilerChildAfterKill(pid)
+		return &RunResult{Success: false}
+	}
+	if err := releaseCompilerCgroupGate(gateWriter); err != nil {
+		warnf("release compiler cgroup gate failed: %v", err)
+		killCompilerProcessTree(pid, controller)
+		waitCompilerChildAfterKill(pid)
+		return &RunResult{Success: false}
+	}
 
-	_, err = syscall.Wait4(pid, &status, 0, nil)
+	result := RunResult{Success: false}
+	timeout := compilerWallClockTimeout(cfg.CPU)
+	status, timedOut, err := waitForCompilerChild(pid, timeout, controller)
+	if timedOut {
+		warnf("compiler wall-clock limit %s exceeded", timeout)
+	}
 	if err != nil {
 		warnf("wait compiler child failed: %v", err)
 		return &result
@@ -266,4 +386,70 @@ func handle(cfg *CompileConfig) *RunResult {
 		warnf("%s", compileFailureReason(status))
 	}
 	return &result
+}
+
+type compilerWaitResult struct {
+	status syscall.WaitStatus
+	err    error
+}
+
+func waitForCompilerChild(pid int, timeout time.Duration, controller runner.TaskController) (syscall.WaitStatus, bool, error) {
+	waitCh := make(chan compilerWaitResult, 1)
+	go func() {
+		var status syscall.WaitStatus
+		_, err := compilerWait4(pid, &status, 0, nil)
+		waitCh <- compilerWaitResult{status: status, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case waitResult := <-waitCh:
+		return waitResult.status, false, waitResult.err
+	case <-timer.C:
+		killCompilerProcessTree(pid, controller)
+		select {
+		case waitResult := <-waitCh:
+			return waitResult.status, true, waitResult.err
+		case <-time.After(compilerKillGraceTimeout):
+			return 0, true, fmt.Errorf("compiler child %d did not exit after kill within %s", pid, compilerKillGraceTimeout)
+		}
+	}
+}
+
+func waitCompilerChildAfterKill(pid int) {
+	var status syscall.WaitStatus
+	if _, err := compilerWait4(pid, &status, 0, nil); err != nil {
+		warnf("wait compiler child after kill failed: %v", err)
+	}
+}
+
+func killCompilerProcessTree(pid int, controller runner.TaskController) {
+	if controller != nil {
+		if err := controller.Kill(); err != nil {
+			warnf("kill compiler task cgroup failed: %v", err)
+		}
+	}
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+}
+
+func cleanupCompilerTaskController(pid int, controller runner.TaskController) {
+	if controller == nil {
+		return
+	}
+	if err := controller.Cleanup(); err == nil {
+		return
+	} else {
+		warnf("cleanup compiler task cgroup failed: %v", err)
+	}
+
+	killCompilerProcessTree(pid, controller)
+	if err := controller.Cleanup(); err != nil {
+		warnf("cleanup compiler task cgroup after kill failed: %v", err)
+	}
 }

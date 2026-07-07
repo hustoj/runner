@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/hustoj/runner/runner"
 	"golang.org/x/sys/unix"
@@ -264,18 +266,183 @@ func TestDropCompilerCredentialsRejectsMismatchedUIDGID(t *testing.T) {
 	}
 }
 
+func TestDropCompilerCredentialsNoopsWhenAlreadyTargetIdentity(t *testing.T) {
+	uid := os.Geteuid()
+	gid := os.Getegid()
+	if uid <= 0 || gid <= 0 {
+		t.Skip("requires a non-root test process")
+	}
+
+	if err := dropCompilerCredentials(&CompileConfig{RunUID: uid, RunGID: gid}); err != nil {
+		t.Fatalf("dropCompilerCredentials() error = %v, want nil", err)
+	}
+}
+
 func TestHandleRejectsInvalidSandboxConfig(t *testing.T) {
 	if _, err := runner.InitLogger("/dev/null", false); err != nil {
 		t.Fatalf("InitLogger error = %v", err)
 	}
 
 	cfg := &CompileConfig{
-		RunUID: 1000,
-		RunGID: -1, // mismatched: uid set, gid not set
+		RunUID:   1000,
+		RunGID:   -1, // mismatched: uid set, gid not set
+		MaxProcs: 32,
 	}
 
 	result := handle(cfg)
 	if result.Success {
 		t.Fatal("handle() should return Success=false for invalid sandbox config")
 	}
+}
+
+func TestHandleMovesCompilerIntoTaskController(t *testing.T) {
+	withCompilerEffectiveUID(t, 1000)
+
+	fakeController := &fakeCompilerTaskController{}
+	withCompilerTaskController(t, func(cfg *CompileConfig) (runner.TaskController, error) {
+		if cfg.MaxProcs != 32 {
+			t.Fatalf("MaxProcs = %d, want 32", cfg.MaxProcs)
+		}
+		return fakeController, nil
+	})
+	gateCh := make(chan byte, 1)
+	withCompilerBootstrapStart(t, func(cfg *CompileConfig, gateReader *os.File) (int, error) {
+		readCompilerGateInTest(t, gateReader, gateCh)
+		return 4321, nil
+	})
+
+	successStatus := waitStatusForExit(t, 0)
+	withCompilerWait4(t, func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		*status = successStatus
+		return pid, nil
+	})
+
+	result := handle(validCompilerConfig())
+	if !result.Success {
+		t.Fatal("handle() Success = false, want true")
+	}
+	if fakeController.movedPID != 4321 {
+		t.Fatalf("MovePID pid = %d, want 4321", fakeController.movedPID)
+	}
+	if got := <-gateCh; got != 1 {
+		t.Fatalf("cgroup gate byte = %d, want 1", got)
+	}
+	if fakeController.cleanupCalls == 0 {
+		t.Fatal("Cleanup was not called")
+	}
+	if fakeController.killed {
+		t.Fatal("Kill should not be called for a clean compile")
+	}
+}
+
+func TestWaitForCompilerChildKillsOnTimeout(t *testing.T) {
+	controller := &fakeCompilerTaskController{killCh: make(chan struct{})}
+	killedStatus := waitStatusForCommand(t, "kill -KILL $$")
+
+	withCompilerWait4(t, func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		<-controller.killCh
+		*status = killedStatus
+		return pid, nil
+	})
+
+	status, timedOut, err := waitForCompilerChild(4321, time.Millisecond, controller)
+	if err != nil {
+		t.Fatalf("waitForCompilerChild() error = %v", err)
+	}
+	if !timedOut {
+		t.Fatal("timedOut = false, want true")
+	}
+	if !controller.killed {
+		t.Fatal("Kill was not called on timeout")
+	}
+	if !status.Signaled() || status.Signal() != syscall.SIGKILL {
+		t.Fatalf("status = %v, want SIGKILL", status)
+	}
+}
+
+type fakeCompilerTaskController struct {
+	movedPID     int
+	cleanupCalls int
+	killed       bool
+	killCh       chan struct{}
+	killOnce     sync.Once
+}
+
+func (controller *fakeCompilerTaskController) MovePID(pid int) error {
+	controller.movedPID = pid
+	return nil
+}
+
+func (controller *fakeCompilerTaskController) Kill() error {
+	controller.killed = true
+	if controller.killCh != nil {
+		controller.killOnce.Do(func() { close(controller.killCh) })
+	}
+	return nil
+}
+
+func (controller *fakeCompilerTaskController) Cleanup() error {
+	controller.cleanupCalls++
+	return nil
+}
+
+func validCompilerConfig() *CompileConfig {
+	return &CompileConfig{
+		CPU:        1,
+		Memory:     128,
+		Output:     16,
+		Stack:      8,
+		MaxProcs:   32,
+		NoNewPrivs: true,
+		RunUID:     -1,
+		RunGID:     -1,
+	}
+}
+
+func withCompilerTaskController(t *testing.T, factory func(*CompileConfig) (runner.TaskController, error)) {
+	t.Helper()
+
+	previous := newCompilerTaskController
+	newCompilerTaskController = factory
+	t.Cleanup(func() {
+		newCompilerTaskController = previous
+	})
+}
+
+func readCompilerGateInTest(t *testing.T, gateReader *os.File, gateCh chan<- byte) {
+	t.Helper()
+
+	dupFD, err := syscall.Dup(int(gateReader.Fd()))
+	if err != nil {
+		t.Fatalf("dup gate fd: %v", err)
+	}
+	dupFile := os.NewFile(uintptr(dupFD), "test-compiler-cgroup-gate")
+	go func() {
+		defer func() {
+			_ = dupFile.Close()
+		}()
+		buf := []byte{0}
+		_, _ = dupFile.Read(buf)
+		gateCh <- buf[0]
+	}()
+}
+
+func withCompilerBootstrapStart(t *testing.T, start func(*CompileConfig, *os.File) (int, error)) {
+	t.Helper()
+
+	previous := startCompilerBootstrapProcess
+	startCompilerBootstrapProcess = start
+	t.Cleanup(func() {
+		startCompilerBootstrapProcess = previous
+	})
+}
+
+func withCompilerWait4(t *testing.T, wait4 func(int, *syscall.WaitStatus, int, *syscall.Rusage) (int, error)) {
+	t.Helper()
+
+	previous := compilerWait4
+	compilerWait4 = wait4
+	t.Cleanup(func() {
+		compilerWait4 = previous
+	})
 }

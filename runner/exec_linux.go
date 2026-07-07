@@ -173,7 +173,7 @@ func setAlarm(seconds uint64) syscall.Errno {
 	return errno
 }
 
-func (task *RunningTask) runProcess() error {
+func (task *RunningTask) runProcess() (err error) {
 	controller, err := newTaskController(task.setting)
 	if err != nil {
 		return fmt.Errorf("setup task cgroup: %w", err)
@@ -183,6 +183,11 @@ func (task *RunningTask) runProcess() error {
 			return
 		}
 		_ = controller.Cleanup()
+	}()
+	defer func() {
+		if err != nil {
+			task.closeOutputFile()
+		}
 	}()
 
 	spec, err := task.prepareChildProcessSpec()
@@ -215,6 +220,9 @@ func (task *RunningTask) runProcess() error {
 		runChildProcess(spec, startupPipeFDs[0], startupPipeFDs[1], gatePipeFDs[0], gatePipeFDs[1])
 	}
 
+	task.outputFileFD = spec.io.stdout
+	task.hasOutputFileFD = true
+	spec.io.stdout = -1
 	closeChildIOFiles(spec.io)
 	_ = syscall.Close(startupPipeFDs[1])
 	_ = syscall.Close(gatePipeFDs[0])
@@ -283,7 +291,11 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 	wallClockLimit := uint64(task.setting.effectiveWallClockLimitSeconds())
 	stackLimit := uint64(task.setting.Stack) << 20
 	enforcedCPULimit := cpuTimeLimit + 1
-	enforcedOutputLimit := uint64(task.setting.Output) << 20
+	configuredOutputLimit := uint64(task.setting.Output) << 20
+	enforcedOutputLimit := configuredOutputLimit
+	if enforcedOutputLimit < ^uint64(0) {
+		enforcedOutputLimit++
+	}
 
 	return childProcessSpec{
 		io:      ioFiles,

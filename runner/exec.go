@@ -15,6 +15,8 @@ type RunningTask struct {
 	Result            *Result
 	timeLimit         int64
 	memoryLimit       int64
+	outputFileFD      int
+	hasOutputFileFD   bool
 	taskCtrl          taskController
 	wallClockTimedOut atomic.Bool
 }
@@ -227,9 +229,17 @@ func (task *RunningTask) trace() error {
 			// subsequent Signaled() status is caught on the next Wait iteration.
 			if process.Status.Stopped() {
 				sig := process.Status.StopSignal()
-				log.Debugf("forwarding signal %v to pid=%d", sig, process.CurrentPid)
 				task.parseRunningInfo()
+				if task.applyOutputLimitSignal(sig) {
+					log.Debugf("kill by output limit signal: %v", sig)
+					process.Kill()
+					break
+				}
 				task.checkLimit()
+				if process.IsKilled {
+					break
+				}
+				log.Debugf("forwarding signal %v to pid=%d", sig, process.CurrentPid)
 				if !process.ContinueWithMode(resumeMode, int(sig)) {
 					log.Infof("Program not alive after signal forward")
 					task.parseRunningInfo()
@@ -336,17 +346,13 @@ func (task *RunningTask) handleBrokenTraceStop(reason string) {
 	}
 	task.parseRunningInfo()
 	if process.Status.Stopped() {
-		task.Result.detectSignal(process.Status.StopSignal())
+		if !task.applyOutputLimitSignal(process.Status.StopSignal()) {
+			task.Result.detectSignal(process.Status.StopSignal())
+		}
 	} else if process.Status.Signaled() {
 		task.applyTerminationSignal(process.Status.Signal())
-	} else {
-		if task.outOfTime() {
-			task.Result.RetCode = TIME_LIMIT
-		} else if task.outOfMemory() {
-			task.Result.RetCode = MEMORY_LIMIT
-		} else {
-			log.Warnf("process broken, but cause can't detect")
-		}
+	} else if !task.promoteResourceLimitResult() {
+		log.Warnf("process broken, but cause can't detect")
 	}
 
 	log.Debugf("Process broken, will kill process")
@@ -364,49 +370,52 @@ func (task *RunningTask) applyTerminationSignal(signal os.Signal) {
 	if !task.Result.isAccept() {
 		return
 	}
-	if signal == syscall.SIGKILL {
-		if task.outOfWallClockTime() {
-			task.Result.RetCode = TIME_LIMIT
-			return
-		}
-		if task.outOfTime() {
-			task.Result.RetCode = TIME_LIMIT
-			return
-		}
-		if task.outOfMemory() {
-			task.Result.RetCode = MEMORY_LIMIT
-			return
-		}
+	if task.applyOutputLimitSignal(signal) {
+		return
+	}
+	if signal == syscall.SIGKILL && task.promoteResourceLimitResult() {
+		return
 	}
 	task.Result.detectSignal(signal)
 }
 
 func (task *RunningTask) check() {
 	log.Debug(task.Result.String())
-	if task.outOfMemory() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == RUNTIME_ERROR) {
-		task.Result.RetCode = MEMORY_LIMIT
-	}
-	if task.outOfWallClockTime() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == RUNTIME_ERROR || task.Result.RetCode == MEMORY_LIMIT) {
-		task.Result.RetCode = TIME_LIMIT
-	}
-	if task.outOfTime() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == MEMORY_LIMIT) {
-		task.Result.RetCode = TIME_LIMIT
-	}
+	task.promoteResourceLimitResult()
 }
 
 func (task *RunningTask) checkLimit() {
-	if task.outOfTime() {
-		task.Result.RetCode = TIME_LIMIT
-		log.Debugf("kill by time limit: current %d, limit %d", task.Result.TimeCost, task.timeLimit)
-		task.process.Kill()
+	if !task.promoteResourceLimitResult() {
 		return
+	}
+
+	switch task.Result.RetCode {
+	case OUTPUT_LIMIT:
+		log.Debugf("kill by output limit")
+	case MEMORY_LIMIT:
+		log.Debugf("kill by memory limit: peak %d, rusage: %d, limit %d", task.Result.PeakMemory, task.Result.RusageMemory, task.memoryLimit)
+	case TIME_LIMIT:
+		log.Debugf("kill by time limit: current %d, limit %d", task.Result.TimeCost, task.timeLimit)
+	}
+	task.process.Kill()
+}
+
+func (task *RunningTask) promoteResourceLimitResult() bool {
+	if !task.Result.isAccept() {
+		return false
+	}
+	if task.promoteOutputLimitResultIfExceeded() {
+		return true
 	}
 	if task.outOfMemory() {
 		task.Result.RetCode = MEMORY_LIMIT
-		log.Debugf("kill by memory limit: peak %d, rusage: %d, limit %d", task.Result.PeakMemory, task.Result.RusageMemory, task.memoryLimit)
-		task.process.Kill()
-		return
+		return true
 	}
+	if task.outOfWallClockTime() || task.outOfTime() {
+		task.Result.RetCode = TIME_LIMIT
+		return true
+	}
+	return false
 }
 
 func (task *RunningTask) outOfTime() bool {
@@ -415,6 +424,86 @@ func (task *RunningTask) outOfTime() bool {
 		log.Infof("TLE: Time limit: %d, time cost: %d", task.timeLimit, task.Result.TimeCost)
 	}
 	return isTLE
+}
+
+func (task *RunningTask) promoteOutputLimitResultIfExceeded() bool {
+	currentSize, limit, exceeded := task.outputFileLimitExceeded()
+	if !exceeded {
+		return false
+	}
+
+	log.Infof("OLE: Output limit: %d. Size %d.", limit, currentSize)
+	task.truncateOutputFileToLimit(limit, currentSize)
+	if task.Result.isAccept() {
+		task.Result.RetCode = OUTPUT_LIMIT
+	}
+	return true
+}
+
+func (task *RunningTask) outputFileLimitExceeded() (int64, int64, bool) {
+	currentSize, ok := task.outputFileSize()
+	if !ok {
+		return 0, 0, false
+	}
+	limit := task.configuredOutputLimitBytes()
+	return currentSize, limit, currentSize > limit
+}
+
+func (task *RunningTask) outputFileSize() (int64, bool) {
+	if !task.hasOutputFileFD || task.setting == nil {
+		return 0, false
+	}
+
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(task.outputFileFD, &stat); err != nil {
+		log.Infof("read output file status failed: %v", err)
+		return 0, false
+	}
+	return stat.Size, true
+}
+
+func (task *RunningTask) configuredOutputLimitBytes() int64 {
+	if task.setting == nil {
+		return 0
+	}
+	return int64(task.setting.Output) << 20
+}
+
+func (task *RunningTask) applyOutputLimitSignal(signal os.Signal) bool {
+	if signal != syscall.SIGXFSZ {
+		return false
+	}
+	task.truncateOutputFileToConfiguredLimit()
+	if task.Result.isAccept() {
+		task.Result.RetCode = OUTPUT_LIMIT
+	}
+	return true
+}
+
+func (task *RunningTask) truncateOutputFileToConfiguredLimit() {
+	currentSize, ok := task.outputFileSize()
+	if !ok {
+		return
+	}
+	task.truncateOutputFileToLimit(task.configuredOutputLimitBytes(), currentSize)
+}
+
+func (task *RunningTask) truncateOutputFileToLimit(limit int64, currentSize int64) {
+	if currentSize <= limit {
+		return
+	}
+	if err := syscall.Ftruncate(task.outputFileFD, limit); err != nil {
+		log.Infof("truncate output file to limit %d failed: %v", limit, err)
+	}
+}
+
+func (task *RunningTask) closeOutputFile() {
+	if !task.hasOutputFileFD {
+		return
+	}
+	_ = syscall.Close(task.outputFileFD)
+	task.outputFileFD = 0
+	task.hasOutputFileFD = false
 }
 
 func (task *RunningTask) outOfWallClockTime() bool {
@@ -549,6 +638,7 @@ func (task *RunningTask) refreshFinalMemoryResult() error {
 }
 
 func (task *RunningTask) cleanupRuntimeResources() {
+	task.closeOutputFile()
 	if task.taskCtrl == nil {
 		return
 	}

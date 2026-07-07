@@ -54,7 +54,7 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	const (
 		wantCPULimit     = uint64(3)
 		wantStackLimit   = uint64(8) << 20
-		wantOutputLimit  = uint64(16) << 20
+		wantOutputLimit  = (uint64(16) << 20) + 1
 		wantNoFileLimit  = uint64(16)
 		wantCoreLimit    = uint64(0)
 		wantAlarmSeconds = uint64(14)

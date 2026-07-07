@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -148,7 +149,82 @@ func TestApplyTerminationSignalTreatsSIGKILLAsMemoryLimitWhenControllerExceeded(
 	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
 }
 
-func TestCheckPromotesRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing.T) {
+func TestApplyTerminationSignalPrefersMemoryLimitWhenSIGKILLIsAlsoOverTime(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{
+			TimeCost: 2,
+		},
+		timeLimit: 1,
+		taskCtrl: fakeTaskController{
+			status: memoryStatus{
+				PeakMemoryKB: 2048,
+				OOMCount:     1,
+			},
+		},
+	}
+	task.Result.Init()
+	task.Result.TimeCost = 2
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+}
+
+func TestApplyTerminationSignalPrefersMemoryLimitWhenSIGKILLIsAlsoOverWallClock(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{},
+		taskCtrl: fakeTaskController{
+			status: memoryStatus{
+				PeakMemoryKB: 2048,
+				OOMCount:     1,
+			},
+		},
+	}
+	task.Result.Init()
+	task.wallClockTimedOut.Store(true)
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+}
+
+func TestApplyTerminationSignalPrefersOutputLimitWhenSIGKILLIsAlsoOverMemory(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	file, err := os.CreateTemp(t.TempDir(), "user.out")
+	assert.NoError(t, err)
+	defer func() { _ = file.Close() }()
+
+	_, err = file.Write([]byte("x"))
+	assert.NoError(t, err)
+
+	task := RunningTask{
+		setting:         &TaskConfig{Output: 0},
+		Result:          &Result{},
+		outputFileFD:    int(file.Fd()),
+		hasOutputFileFD: true,
+		taskCtrl: fakeTaskController{
+			status: memoryStatus{
+				PeakMemoryKB: 2048,
+				OOMCount:     1,
+			},
+		},
+	}
+	task.Result.Init()
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, OUTPUT_LIMIT, task.Result.RetCode)
+}
+
+func TestCheckDoesNotPromoteRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing.T) {
 	SetLogger(zap.NewNop().Sugar())
 	defer SetLogger(nil)
 
@@ -166,10 +242,10 @@ func TestCheckPromotesRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing
 
 	task.check()
 
-	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
 }
 
-func TestCheckPromotesRuntimeErrorToTimeLimitWhenWallClockWatchdogFired(t *testing.T) {
+func TestCheckDoesNotPromoteRuntimeErrorToTimeLimitWhenWallClockWatchdogFired(t *testing.T) {
 	SetLogger(zap.NewNop().Sugar())
 	defer SetLogger(nil)
 
@@ -183,5 +259,91 @@ func TestCheckPromotesRuntimeErrorToTimeLimitWhenWallClockWatchdogFired(t *testi
 
 	task.check()
 
+	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
+}
+
+func TestCheckDoesNotPromoteMemoryLimitToTimeLimit(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{
+			RetCode:  MEMORY_LIMIT,
+			TimeCost: 2,
+		},
+		timeLimit: 1,
+	}
+
+	task.check()
+
+	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+}
+
+func TestCheckPromotesAcceptToOutputLimitWhenOutputFileExceedsLimit(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	file, err := os.CreateTemp(t.TempDir(), "user.out")
+	assert.NoError(t, err)
+	defer func() { _ = file.Close() }()
+
+	_, err = file.Write([]byte("x"))
+	assert.NoError(t, err)
+
+	task := RunningTask{
+		setting:         &TaskConfig{Output: 0},
+		Result:          &Result{},
+		outputFileFD:    int(file.Fd()),
+		hasOutputFileFD: true,
+	}
+	task.Result.Init()
+
+	task.check()
+
+	assert.Equal(t, OUTPUT_LIMIT, task.Result.RetCode)
+	assertOutputFileSize(t, file, 0)
+}
+
+func TestApplyOutputLimitSignalTruncatesOutputFileToLimit(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "user.out")
+	assert.NoError(t, err)
+	defer func() { _ = file.Close() }()
+
+	_, err = file.Write([]byte("x"))
+	assert.NoError(t, err)
+
+	task := RunningTask{
+		setting:         &TaskConfig{Output: 0},
+		Result:          &Result{},
+		outputFileFD:    int(file.Fd()),
+		hasOutputFileFD: true,
+	}
+	task.Result.Init()
+
+	assert.True(t, task.applyOutputLimitSignal(syscall.SIGXFSZ))
+	assert.Equal(t, OUTPUT_LIMIT, task.Result.RetCode)
+	assertOutputFileSize(t, file, 0)
+}
+
+func TestApplyOutputLimitSignalMarksAcceptAsOutputLimit(t *testing.T) {
+	task := RunningTask{Result: &Result{}}
+	task.Result.Init()
+
+	assert.True(t, task.applyOutputLimitSignal(syscall.SIGXFSZ))
+	assert.Equal(t, OUTPUT_LIMIT, task.Result.RetCode)
+}
+
+func TestApplyOutputLimitSignalDoesNotOverrideExistingResult(t *testing.T) {
+	task := RunningTask{Result: &Result{RetCode: TIME_LIMIT}}
+
+	assert.True(t, task.applyOutputLimitSignal(syscall.SIGXFSZ))
 	assert.Equal(t, TIME_LIMIT, task.Result.RetCode)
+}
+
+func assertOutputFileSize(t *testing.T, file *os.File, want int64) {
+	t.Helper()
+
+	info, err := file.Stat()
+	assert.NoError(t, err)
+	assert.Equal(t, want, info.Size())
 }

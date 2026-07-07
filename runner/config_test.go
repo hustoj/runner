@@ -20,11 +20,14 @@ func TestLoadConfigAllowsWarningsBeforeLoggerInit(t *testing.T) {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		warnings := cfg.ValidationWarnings()
-		if len(warnings) != 1 {
-			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
+		if len(warnings) != 2 {
+			t.Fatalf("ValidationWarnings() len = %d, want 2", len(warnings))
 		}
 		if warnings[0] != namespacePrivilegeWarning {
-			t.Fatalf("ValidationWarnings() = %q, want %q", warnings[0], namespacePrivilegeWarning)
+			t.Fatalf("ValidationWarnings()[0] = %q, want %q", warnings[0], namespacePrivilegeWarning)
+		}
+		if warnings[1] != privilegedChildWarning {
+			t.Fatalf("ValidationWarnings()[1] = %q, want %q", warnings[1], privilegedChildWarning)
 		}
 	})
 }
@@ -97,13 +100,23 @@ func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		warnings := cfg.ValidationWarnings()
-		if len(warnings) != 1 {
-			t.Fatalf("ValidationWarnings() len = %d, want 1", len(warnings))
+		if len(warnings) != 2 {
+			t.Fatalf("ValidationWarnings() len = %d, want 2", len(warnings))
 		}
 		if warnings[0] != memoryReserveDeprecatedWarning {
-			t.Fatalf("ValidationWarnings() = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
+			t.Fatalf("ValidationWarnings()[0] = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
+		}
+		if warnings[1] != privilegedChildWarning {
+			t.Fatalf("ValidationWarnings()[1] = %q, want %q", warnings[1], privilegedChildWarning)
 		}
 	})
+}
+
+func TestValidationWarningsEmptyForSafeConfig(t *testing.T) {
+	cfg := &TaskConfig{RunUID: -1, RunGID: -1}
+	if warnings := cfg.ValidationWarnings(); len(warnings) != 0 {
+		t.Fatalf("ValidationWarnings() = %v, want empty for safe config", warnings)
+	}
 }
 
 func TestSyscallBackendDefaultsToPtrace(t *testing.T) {

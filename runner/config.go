@@ -58,6 +58,8 @@ const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop 
 
 const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
 
+const privilegedChildWarning = "AllowPrivilegedChild is set: child will run as root without chroot/namespace isolation (high-risk mode)"
+
 const (
 	syscallBackendPtrace = "ptrace"
 	syscallBackendHybrid = "hybrid"
@@ -130,6 +132,10 @@ func (tc *TaskConfig) ValidationWarnings() []string {
 
 	if tc.MemoryReserve > 0 {
 		warnings = append(warnings, memoryReserveDeprecatedWarning)
+	}
+
+	if tc.AllowPrivilegedChild {
+		warnings = append(warnings, privilegedChildWarning)
 	}
 
 	if len(warnings) == 0 {

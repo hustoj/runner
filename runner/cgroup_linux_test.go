@@ -4,12 +4,9 @@ package runner
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestFindDelegatedCgroupParentFindsNearestWritableAncestor(t *testing.T) {
@@ -108,6 +105,7 @@ func TestCgroupTaskControllerKillUsesCgroupKillWhenAvailable(t *testing.T) {
 	controller := &cgroupTaskController{path: t.TempDir()}
 	killPath := filepath.Join(controller.path, "cgroup.kill")
 	writeTestCgroupFile(t, killPath, "")
+	writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "")
 
 	if err := controller.Kill(); err != nil {
 		t.Fatalf("Kill() error = %v", err)
@@ -124,50 +122,70 @@ func TestCgroupTaskControllerKillUsesCgroupKillWhenAvailable(t *testing.T) {
 
 func TestCgroupTaskControllerKillFallsBackToCgroupProcs(t *testing.T) {
 	controller := &cgroupTaskController{path: t.TempDir()}
+	writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "123\n456\n")
 
-	cmd := exec.Command("sleep", "60")
-	if err := cmd.Start(); err != nil {
-		t.Skipf("start sleep command: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-	waited := false
-	defer func() {
-		if waited {
-			return
+	oldKill := signalCgroupProcess
+	var killed []int
+	signalCgroupProcess = func(pid int, signal syscall.Signal) error {
+		if signal != syscall.SIGKILL {
+			t.Fatalf("kill signal = %v, want SIGKILL", signal)
 		}
-		_ = cmd.Process.Kill()
-		<-done
+		killed = append(killed, pid)
+		if pid == 456 {
+			writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "")
+		}
+		return nil
+	}
+	defer func() {
+		signalCgroupProcess = oldKill
 	}()
-
-	writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), strconv.Itoa(cmd.Process.Pid)+"\n")
 
 	if err := controller.Kill(); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
 
-	select {
-	case err := <-done:
-		waited = true
-		if err == nil {
-			t.Fatal("sleep exited successfully, want SIGKILL")
+	requireKilledPIDs(t, killed, 123, 456)
+}
+
+func TestCgroupTaskControllerKillFallbackRepeatsUntilCgroupIsEmpty(t *testing.T) {
+	controller := &cgroupTaskController{path: t.TempDir()}
+	writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "123\n")
+
+	oldKill := signalCgroupProcess
+	var killed []int
+	signalCgroupProcess = func(pid int, signal syscall.Signal) error {
+		if signal != syscall.SIGKILL {
+			t.Fatalf("kill signal = %v, want SIGKILL", signal)
 		}
-		exitErr, ok := err.(*exec.ExitError)
-		if !ok {
-			t.Fatalf("sleep wait error = %T %v, want *exec.ExitError", err, err)
+		killed = append(killed, pid)
+		switch pid {
+		case 123:
+			writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "456\n")
+		case 456:
+			writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), "")
 		}
-		status, ok := exitErr.Sys().(syscall.WaitStatus)
-		if !ok {
-			t.Fatalf("sleep exit status type = %T, want syscall.WaitStatus", exitErr.Sys())
+		return nil
+	}
+	defer func() {
+		signalCgroupProcess = oldKill
+	}()
+
+	if err := controller.Kill(); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	requireKilledPIDs(t, killed, 123, 456)
+}
+
+func requireKilledPIDs(t *testing.T, got []int, want ...int) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("killed pids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("killed pids = %v, want %v", got, want)
 		}
-		if !status.Signaled() || status.Signal() != syscall.SIGKILL {
-			t.Fatalf("sleep wait status = %v, want SIGKILL", status)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("sleep was not killed by cgroup.procs fallback")
 	}
 }
 

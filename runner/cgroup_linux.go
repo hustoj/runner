@@ -15,10 +15,14 @@ import (
 )
 
 const (
-	defaultCgroupMountRoot = "/sys/fs/cgroup"
-	cgroupMountEnv         = "RUNNER_CGROUP_MOUNT"
-	cgroupParentEnv        = "RUNNER_CGROUP_PARENT"
+	defaultCgroupMountRoot      = "/sys/fs/cgroup"
+	cgroupMountEnv              = "RUNNER_CGROUP_MOUNT"
+	cgroupParentEnv             = "RUNNER_CGROUP_PARENT"
+	cgroupKillDrainTimeout      = time.Second
+	cgroupKillDrainPollInterval = 10 * time.Millisecond
 )
+
+var signalCgroupProcess = unix.Kill
 
 func newTaskController(setting *TaskConfig) (taskController, error) {
 	return newCgroupTaskController(setting.Memory, setting.MaxProcs)
@@ -278,31 +282,76 @@ func (controller *cgroupTaskController) MovePID(pid int) error {
 func (controller *cgroupTaskController) Kill() error {
 	var primaryErr error
 	if err := writeCgroupFile(filepath.Join(controller.path, "cgroup.kill"), "1"); err == nil {
-		return nil
+		return controller.waitForNoMemberProcesses(cgroupKillDrainTimeout)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		primaryErr = fmt.Errorf("write cgroup.kill: %w", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(controller.path, "cgroup.procs"))
-	if err != nil {
-		return errors.Join(primaryErr, fmt.Errorf("read cgroup.procs for kill fallback: %w", err))
-	}
-
-	var killErrs []error
-	for _, field := range strings.Fields(string(content)) {
-		pid, err := strconv.Atoi(field)
-		if err != nil {
-			killErrs = append(killErrs, fmt.Errorf("parse cgroup pid %q: %w", field, err))
-			continue
-		}
-		if err := unix.Kill(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-			killErrs = append(killErrs, fmt.Errorf("kill cgroup pid %d: %w", pid, err))
-		}
-	}
-	if len(killErrs) > 0 {
-		return errors.Join(primaryErr, errors.Join(killErrs...))
+	if err := controller.killMemberProcessesUntilDrained(cgroupKillDrainTimeout); err != nil {
+		return errors.Join(primaryErr, err)
 	}
 	return nil
+}
+
+func (controller *cgroupTaskController) killMemberProcessesUntilDrained(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var result error
+	for {
+		pids, err := controller.memberProcessIDs()
+		if err != nil {
+			return errors.Join(result, err)
+		}
+		if len(pids) == 0 {
+			return result
+		}
+
+		for _, pid := range pids {
+			if err := signalCgroupProcess(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+				result = errors.Join(result, fmt.Errorf("kill cgroup process %d: %w", pid, err))
+			}
+		}
+		if time.Now().After(deadline) {
+			return errors.Join(result, fmt.Errorf("cgroup still has processes after kill: %v", pids))
+		}
+		time.Sleep(cgroupKillDrainPollInterval)
+	}
+}
+
+func (controller *cgroupTaskController) memberProcessIDs() ([]int, error) {
+	content, err := os.ReadFile(filepath.Join(controller.path, "cgroup.procs"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read cgroup.procs: %w", err)
+	}
+
+	pids := make([]int, 0)
+	for _, rawPID := range strings.Fields(string(content)) {
+		pid, err := strconv.Atoi(rawPID)
+		if err != nil {
+			return nil, fmt.Errorf("parse cgroup pid %q: %w", rawPID, err)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
+func (controller *cgroupTaskController) waitForNoMemberProcesses(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		pids, err := controller.memberProcessIDs()
+		if err != nil {
+			return err
+		}
+		if len(pids) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("cgroup still has processes after kill: %v", pids)
+		}
+		time.Sleep(cgroupKillDrainPollInterval)
+	}
 }
 
 func (controller *cgroupTaskController) Cleanup() error {

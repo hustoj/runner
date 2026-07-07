@@ -24,6 +24,12 @@ func newTaskController(setting *TaskConfig) (taskController, error) {
 	return newCgroupTaskController(setting.Memory, setting.MaxProcs)
 }
 
+// NewCgroupTaskController creates a cgroup v2 controller with memory and pids
+// limits for non-runner launchers such as the compiler bootstrap.
+func NewCgroupTaskController(limitMB int, maxProcs int) (TaskController, error) {
+	return newCgroupTaskController(limitMB, maxProcs)
+}
+
 type cgroupTaskController struct {
 	path string
 }

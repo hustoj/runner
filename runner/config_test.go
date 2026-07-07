@@ -140,6 +140,7 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 		wantMsg string
 	}{
 		{"CPU", `{"CPU":-1}`, "cpu must be >= 0"},
+		{"WallClock", `{"WallClock":-1}`, "wallClock must be >= 0"},
 		{"Memory", `{"Memory":-1}`, "memory must be >= 0"},
 		{"MemoryReserve", `{"MemoryReserve":-1}`, "memoryReserve must be >= 0"},
 		{"Output", `{"Output":-1}`, "output must be >= 0"},
@@ -166,6 +167,62 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestEffectiveWallClockLimitDefaultsToCPU(t *testing.T) {
+	cfg := &TaskConfig{CPU: 3}
+
+	if got := cfg.effectiveWallClockLimitSeconds(); got != 3 {
+		t.Fatalf("effectiveWallClockLimitSeconds() = %d, want 3", got)
+	}
+}
+
+func TestEffectiveWallClockLimitUsesExplicitWallClock(t *testing.T) {
+	cfg := &TaskConfig{CPU: 3, WallClock: 7}
+
+	if got := cfg.effectiveWallClockLimitSeconds(); got != 7 {
+		t.Fatalf("effectiveWallClockLimitSeconds() = %d, want 7", got)
+	}
+}
+
+func TestLoadConfigParsesWallClockLimit(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+
+	runWithTempCaseJSON(t, `{"CPU":2,"WallClock":5}`, func() {
+		SetLogger(nil)
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.WallClock != 5 {
+			t.Fatalf("LoadConfig() WallClock = %d, want 5", cfg.WallClock)
+		}
+		if got := cfg.effectiveWallClockLimitSeconds(); got != 5 {
+			t.Fatalf("effectiveWallClockLimitSeconds() = %d, want 5", got)
+		}
+	})
+}
+
+func TestLoadConfigDefaultsWallClockLimitToCPU(t *testing.T) {
+	restoreGlobals := preserveConfigTestGlobals()
+	defer restoreGlobals()
+
+	runWithTempCaseJSON(t, `{}`, func() {
+		SetLogger(nil)
+
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if cfg.WallClock != 0 {
+			t.Fatalf("LoadConfig() WallClock = %d, want 0", cfg.WallClock)
+		}
+		if got := cfg.effectiveWallClockLimitSeconds(); got != cfg.CPU {
+			t.Fatalf("effectiveWallClockLimitSeconds() = %d, want CPU %d", got, cfg.CPU)
+		}
+	})
 }
 
 func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {

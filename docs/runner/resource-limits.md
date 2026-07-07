@@ -7,6 +7,10 @@
 - `CPU`
   - 单位：秒
   - 语义：判题使用的 CPU 时间上限
+- `WallClock`
+  - 单位：秒
+  - 语义：父进程 wall-clock watchdog 的真实耗时上限
+  - 默认值 `0` 表示沿用 `CPU`，兼容旧 `case.json`
 - `Memory`
   - 单位：MB
   - 语义：任务的**总内存预算**
@@ -40,7 +44,7 @@ Linux 运行期现在分成两类：
    - enforcement 来自 cgroup v2 `pids.max`
    - 触发后通常表现为新的 `clone()` / `clone3()` / `fork()` 失败
 3. **判题层 + 内核兜底**
-   - 目前是 CPU / Output / Stack
+   - 目前是 CPU / WallClock / Output / Stack
    - 分别由 trace 结果、signal、`setrlimit` 与 `alarm` 共同决定
 
 这意味着：
@@ -98,14 +102,15 @@ Linux 运行期现在分成两类：
 - 相关背景：
   - Java 回归与最终修复见 [`java-runtime-follow-up.md`](./java-runtime-follow-up.md)
 
-### CPU
+### CPU / WallClock
 
-- 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值；父进程同时以 `CPU` 秒作为 wall-clock 硬截止
-- 结果判定：CPU rusage 或 wall-clock 任一超过 `CPU` 后记为 `TIME_LIMIT`
+- CPU 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值
+- WallClock 判题口径：父进程 wall-clock watchdog 使用真实耗时；`WallClock = 0` 时沿用 `CPU`
+- 结果判定：CPU rusage 超过 `CPU`，或 wall-clock 超过有效 WallClock 后，均记为 `TIME_LIMIT`
 - 父进程兜底：wall-clock watchdog 到期后杀 task cgroup / 进程组，并按 `TIME_LIMIT` 收口
 - 子进程内核兜底：
   - `RLIMIT_CPU = CPU + 1`
-  - `alarm = CPU + 5`
+  - `alarm = effective WallClock + 5`
   - `alarm` 只作为额外保护，不能作为最终 wall-clock enforcement，因为用户程序可以捕获或忽略 `SIGALRM`
 
 ### Output

@@ -106,7 +106,7 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 
 内存迁移主方案本身没有改动：
 
-- CPU：父进程 wall-clock watchdog + `RLIMIT_CPU` + `alarm`
+- CPU / WallClock：父进程 wall-clock watchdog + `RLIMIT_CPU` + `alarm`
 - Output：`RLIMIT_FSIZE`
 - Stack：`RLIMIT_STACK`
 - syscall policy / ptrace 行为

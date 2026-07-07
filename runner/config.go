@@ -14,6 +14,7 @@ import (
 type TaskConfig struct {
 	// Resource limits
 	CPU           int `default:"3"`   // CPU time limit in seconds
+	WallClock     int `default:"0"`   // Wall-clock time limit in seconds (0 = use CPU)
 	Memory        int `default:"256"` // Total task memory budget in MB (Linux cgroup v2 memory.max)
 	MemoryReserve int `default:"0"`   // Deprecated: ignored by the Linux runtime memory controller
 	Output        int `default:"16"`  // Output size limit in MB
@@ -74,6 +75,9 @@ const (
 func (tc *TaskConfig) Validate() error {
 	if tc.CPU < 0 {
 		return fmt.Errorf("cpu must be >= 0 (got %d)", tc.CPU)
+	}
+	if tc.WallClock < 0 {
+		return fmt.Errorf("wallClock must be >= 0 (got %d)", tc.WallClock)
 	}
 	if tc.Memory < 0 {
 		return fmt.Errorf("memory must be >= 0 (got %d)", tc.Memory)
@@ -167,6 +171,13 @@ func (tc *TaskConfig) LogValidationWarnings() {
 
 func (tc *TaskConfig) validateRuntimeSecurity(euid int) error {
 	return validateRuntimeSecurityForPlatform(tc, euid)
+}
+
+func (tc *TaskConfig) effectiveWallClockLimitSeconds() int {
+	if tc.WallClock > 0 {
+		return tc.WallClock
+	}
+	return tc.CPU
 }
 
 func (tc *TaskConfig) effectiveSyscallBackend() string {

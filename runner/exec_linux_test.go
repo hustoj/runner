@@ -33,6 +33,7 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	task := RunningTask{
 		setting: &TaskConfig{
 			CPU:        2,
+			WallClock:  9,
 			Memory:     64,
 			Output:     16,
 			Stack:      8,
@@ -51,11 +52,12 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 	defer closeChildIOFiles(spec.io)
 
 	const (
-		wantCPULimit    = uint64(3)
-		wantStackLimit  = uint64(8) << 20
-		wantOutputLimit = uint64(16) << 20
-		wantNoFileLimit = uint64(16)
-		wantCoreLimit   = uint64(0)
+		wantCPULimit     = uint64(3)
+		wantStackLimit   = uint64(8) << 20
+		wantOutputLimit  = uint64(16) << 20
+		wantNoFileLimit  = uint64(16)
+		wantCoreLimit    = uint64(0)
+		wantAlarmSeconds = uint64(14)
 	)
 
 	if spec.cpuLimit.Cur != wantCPULimit || spec.cpuLimit.Max != wantCPULimit {
@@ -102,6 +104,9 @@ func TestPrepareChildProcessSpecUsesConfiguredResourceLimits(t *testing.T) {
 			wantCoreLimit,
 			wantCoreLimit,
 		)
+	}
+	if spec.alarmSeconds != wantAlarmSeconds {
+		t.Fatalf("prepareChildProcessSpec() alarmSeconds = %d, want %d", spec.alarmSeconds, wantAlarmSeconds)
 	}
 }
 

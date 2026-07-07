@@ -279,9 +279,10 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 		return childProcessSpec{}, err
 	}
 
-	timeLimit := uint64(task.setting.CPU)
+	cpuTimeLimit := uint64(task.setting.CPU)
+	wallClockLimit := uint64(task.setting.effectiveWallClockLimitSeconds())
 	stackLimit := uint64(task.setting.Stack) << 20
-	enforcedCPULimit := timeLimit + 1
+	enforcedCPULimit := cpuTimeLimit + 1
 	enforcedOutputLimit := uint64(task.setting.Output) << 20
 
 	return childProcessSpec{
@@ -309,7 +310,7 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 			Max: 0,
 			Cur: 0,
 		},
-		alarmSeconds: timeLimit + 5,
+		alarmSeconds: wallClockLimit + 5,
 	}, nil
 }
 

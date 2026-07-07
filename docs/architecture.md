@@ -81,7 +81,7 @@ Darwin 占位桩统一返回同一条消息(见 [utils_darwin.go](../runner/util
 
 ```
 LoadConfig                  config.go:174    读 case.json → 追加平台默认 syscall → Validate
-RunningTask.Init            exec.go:18       timeLimit = CPU×1e6µs, memoryLimit = Memory×1024 KB
+RunningTask.Init            exec.go:18       timeLimit = CPU×1e6µs, wall-clock = WallClock 或 CPU, memoryLimit = Memory×1024 KB
 RunningTask.Run             exec.go:30       runtime.LockOSThread → runProcess → trace
   runProcess                exec_linux.go:157  prepareChildProcessSpec + Pipe2 + fork + 读启动失败码
   trace                     exec.go:45      多 tracee 主循环(见下)
@@ -93,7 +93,7 @@ GetResult                   exec.go:39      返回 *Result,JSON 序列化到 std
 子进程在 fork 之后,按 [`childStartupStage`](../runner/exec_linux.go) 枚举(共 25 个阶段)依次执行,任何一步失败都通过启动管道回传 8 字节(stage + errno)给父进程后 `_exit(127)`,由 [`runChildProcess`](../runner/exec_linux.go) 实现:
 
 ```
-setrlimit(CPU) → setitimer(alarm, CPU+5)
+setrlimit(CPU) → setitimer(alarm, effective WallClock+5)
 → setrlimit(FSIZE / STACK / DATA / AS / NPROC / NOFILE / CORE)
 → dup(user.in → stdin, user.out → stdout, user.err → stderr)
 → setpgid(0, 0)
@@ -141,7 +141,7 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 | 资源 | 判杰口径 | 内核兜底 |
 |---|---|---|
-| CPU | 所有 tracee 的 `utime + stime` 累加；父进程同时用 `CPU` 秒作为 wall-clock 硬截止 | 父进程 watchdog 杀 task cgroup / 进程组；子进程仍保留 `RLIMIT_CPU = CPU+1`,`alarm = CPU+5` |
+| CPU / WallClock | CPU 为所有 tracee 的 `utime + stime` 累加；WallClock 为父进程真实耗时硬截止，未配置时沿用 `CPU` | 父进程 watchdog 杀 task cgroup / 进程组；子进程保留 `RLIMIT_CPU = CPU+1`,`alarm = effective WallClock+5` |
 | Memory | `/proc/<pid>/status` 的 `VmHWM` 按 thread group 去重汇总 + rusage 兜底 + 扣除 root tracee 的 bootstrap RSS 基线 | `RLIMIT_DATA = RLIMIT_AS = Memory+MemoryReserve` |
 | Output | — | `RLIMIT_FSIZE = Output`,SIGXFSZ → OUTPUT_LIMIT |
 | Stack | — | `RLIMIT_STACK = Stack` |

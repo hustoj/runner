@@ -29,7 +29,7 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 	task.wallClockTimedOut.Store(false)
 
 	log.Debugf("load case config %#v", task.setting)
-	log.Debugf("Time limit: %d, PeakMemory limit: %d", task.timeLimit, task.memoryLimit)
+	log.Debugf("CPU time limit: %d, wall-clock limit: %d, PeakMemory limit: %d", task.timeLimit, task.wallClockLimitMicros(), task.memoryLimit)
 }
 
 func (task *RunningTask) Run() error {
@@ -52,7 +52,7 @@ func (task *RunningTask) Run() error {
 }
 
 func (task *RunningTask) startWallClockWatchdog() func() {
-	timeout := time.Duration(task.setting.CPU) * time.Second
+	timeout := time.Duration(task.setting.effectiveWallClockLimitSeconds()) * time.Second
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
 	var stopRequested atomic.Bool
@@ -421,8 +421,15 @@ func (task *RunningTask) outOfWallClockTime() bool {
 	if !task.wallClockTimedOut.Load() {
 		return false
 	}
-	log.Infof("TLE: wall-clock time limit: %dus", task.timeLimit)
+	log.Infof("TLE: wall-clock time limit: %dus", task.wallClockLimitMicros())
 	return true
+}
+
+func (task *RunningTask) wallClockLimitMicros() int64 {
+	if task.setting != nil {
+		return int64(task.setting.effectiveWallClockLimitSeconds()) * 1e6
+	}
+	return task.timeLimit
 }
 
 func (task *RunningTask) outOfMemory() bool {

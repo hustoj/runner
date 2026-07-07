@@ -100,11 +100,13 @@ Linux 运行期现在分成两类：
 
 ### CPU
 
-- 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值
-- 结果判定：超过 `CPU` 后记为 `TIME_LIMIT`
-- 内核兜底：
+- 判题口径：所有被跟踪 tracee 的 `utime + stime` 累加值；父进程同时以 `CPU` 秒作为 wall-clock 硬截止
+- 结果判定：CPU rusage 或 wall-clock 任一超过 `CPU` 后记为 `TIME_LIMIT`
+- 父进程兜底：wall-clock watchdog 到期后杀 task cgroup / 进程组，并按 `TIME_LIMIT` 收口
+- 子进程内核兜底：
   - `RLIMIT_CPU = CPU + 1`
   - `alarm = CPU + 5`
+  - `alarm` 只作为额外保护，不能作为最终 wall-clock enforcement，因为用户程序可以捕获或忽略 `SIGALRM`
 
 ### Output
 

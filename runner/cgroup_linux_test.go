@@ -4,8 +4,12 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestFindDelegatedCgroupParentFindsNearestWritableAncestor(t *testing.T) {
@@ -97,6 +101,73 @@ func TestCgroupTaskControllerMemoryStatusUsesPeakAndEvents(t *testing.T) {
 	}
 	if !status.Exceeded() {
 		t.Fatal("MemoryStatus() Exceeded() = false, want true when oom counter is non-zero")
+	}
+}
+
+func TestCgroupTaskControllerKillUsesCgroupKillWhenAvailable(t *testing.T) {
+	controller := &cgroupTaskController{path: t.TempDir()}
+	killPath := filepath.Join(controller.path, "cgroup.kill")
+	writeTestCgroupFile(t, killPath, "")
+
+	if err := controller.Kill(); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	content, err := os.ReadFile(killPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(cgroup.kill) error = %v", err)
+	}
+	if string(content) != "1" {
+		t.Fatalf("cgroup.kill content = %q, want %q", string(content), "1")
+	}
+}
+
+func TestCgroupTaskControllerKillFallsBackToCgroupProcs(t *testing.T) {
+	controller := &cgroupTaskController{path: t.TempDir()}
+
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("start sleep command: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	waited := false
+	defer func() {
+		if waited {
+			return
+		}
+		_ = cmd.Process.Kill()
+		<-done
+	}()
+
+	writeTestCgroupFile(t, filepath.Join(controller.path, "cgroup.procs"), strconv.Itoa(cmd.Process.Pid)+"\n")
+
+	if err := controller.Kill(); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	select {
+	case err := <-done:
+		waited = true
+		if err == nil {
+			t.Fatal("sleep exited successfully, want SIGKILL")
+		}
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("sleep wait error = %T %v, want *exec.ExitError", err, err)
+		}
+		status, ok := exitErr.Sys().(syscall.WaitStatus)
+		if !ok {
+			t.Fatalf("sleep exit status type = %T, want syscall.WaitStatus", exitErr.Sys())
+		}
+		if !status.Signaled() || status.Signal() != syscall.SIGKILL {
+			t.Fatalf("sleep wait status = %v, want SIGKILL", status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sleep was not killed by cgroup.procs fallback")
 	}
 }
 

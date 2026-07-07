@@ -1,0 +1,8 @@
+{
+  "Name": "Wall Clock Time Limit",
+  "verbose": true,
+  "CPU": 1,
+  "Memory": 16,
+  "Result": 7,
+  "AdditionCalls": ["rt_sigaction", "pause"]
+}

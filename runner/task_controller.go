@@ -13,5 +13,6 @@ func (status memoryStatus) Exceeded() bool {
 type taskController interface {
 	MemoryStatus() (memoryStatus, error)
 	MovePID(pid int) error
+	Kill() error
 	Cleanup() error
 }

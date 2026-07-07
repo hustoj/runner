@@ -269,6 +269,36 @@ func (controller *cgroupTaskController) MovePID(pid int) error {
 	return writeCgroupFile(filepath.Join(controller.path, "cgroup.procs"), strconv.Itoa(pid))
 }
 
+func (controller *cgroupTaskController) Kill() error {
+	var primaryErr error
+	if err := writeCgroupFile(filepath.Join(controller.path, "cgroup.kill"), "1"); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		primaryErr = fmt.Errorf("write cgroup.kill: %w", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(controller.path, "cgroup.procs"))
+	if err != nil {
+		return errors.Join(primaryErr, fmt.Errorf("read cgroup.procs for kill fallback: %w", err))
+	}
+
+	var killErrs []error
+	for _, field := range strings.Fields(string(content)) {
+		pid, err := strconv.Atoi(field)
+		if err != nil {
+			killErrs = append(killErrs, fmt.Errorf("parse cgroup pid %q: %w", field, err))
+			continue
+		}
+		if err := unix.Kill(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+			killErrs = append(killErrs, fmt.Errorf("kill cgroup pid %d: %w", pid, err))
+		}
+	}
+	if len(killErrs) > 0 {
+		return errors.Join(primaryErr, errors.Join(killErrs...))
+	}
+	return nil
+}
+
 func (controller *cgroupTaskController) Cleanup() error {
 	if err := os.Remove(controller.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

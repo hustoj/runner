@@ -4,16 +4,19 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 type RunningTask struct {
-	setting     *TaskConfig
-	process     *Process
-	Result      *Result
-	timeLimit   int64
-	memoryLimit int64
-	taskCtrl    taskController
+	setting           *TaskConfig
+	process           *Process
+	Result            *Result
+	timeLimit         int64
+	memoryLimit       int64
+	taskCtrl          taskController
+	wallClockTimedOut atomic.Bool
 }
 
 func (task *RunningTask) Init(setting *TaskConfig) {
@@ -23,6 +26,7 @@ func (task *RunningTask) Init(setting *TaskConfig) {
 
 	task.Result = &Result{}
 	task.Result.Init()
+	task.wallClockTimedOut.Store(false)
 
 	log.Debugf("load case config %#v", task.setting)
 	log.Debugf("Time limit: %d, PeakMemory limit: %d", task.timeLimit, task.memoryLimit)
@@ -42,7 +46,59 @@ func (task *RunningTask) Run() error {
 		return err
 	}
 	defer task.cleanupRuntimeResources()
+	stopWatchdog := task.startWallClockWatchdog()
+	defer stopWatchdog()
 	return task.trace()
+}
+
+func (task *RunningTask) startWallClockWatchdog() func() {
+	timeout := time.Duration(task.setting.CPU) * time.Second
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	var stopRequested atomic.Bool
+
+	go func() {
+		defer close(doneCh)
+
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			if stopRequested.Load() {
+				return
+			}
+			task.wallClockTimedOut.Store(true)
+			log.Infof("wall-clock TLE: limit %s reached, killing task", timeout)
+			task.killProcessTree()
+		case <-stopCh:
+			return
+		}
+	}()
+
+	return func() {
+		if stopRequested.CompareAndSwap(false, true) {
+			close(stopCh)
+		}
+		<-doneCh
+	}
+}
+
+func (task *RunningTask) killProcessTree() {
+	if task.process == nil || task.process.Pid <= 0 {
+		return
+	}
+
+	if task.taskCtrl != nil {
+		if err := task.taskCtrl.Kill(); err != nil {
+			log.Infof("kill task cgroup failed: %v", err)
+		}
+	}
+
+	// The launcher places the child into its own process group before exec.
+	// The direct PID kill is a fallback for early startup failures or setpgid races.
+	_ = syscall.Kill(-task.process.Pid, syscall.SIGKILL)
+	_ = syscall.Kill(task.process.Pid, syscall.SIGKILL)
 }
 
 func (task *RunningTask) GetResult() *Result {
@@ -309,6 +365,10 @@ func (task *RunningTask) applyTerminationSignal(signal os.Signal) {
 		return
 	}
 	if signal == syscall.SIGKILL {
+		if task.outOfWallClockTime() {
+			task.Result.RetCode = TIME_LIMIT
+			return
+		}
 		if task.outOfTime() {
 			task.Result.RetCode = TIME_LIMIT
 			return
@@ -325,6 +385,9 @@ func (task *RunningTask) check() {
 	log.Debug(task.Result.String())
 	if task.outOfMemory() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == RUNTIME_ERROR) {
 		task.Result.RetCode = MEMORY_LIMIT
+	}
+	if task.outOfWallClockTime() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == RUNTIME_ERROR || task.Result.RetCode == MEMORY_LIMIT) {
+		task.Result.RetCode = TIME_LIMIT
 	}
 	if task.outOfTime() && (task.Result.RetCode == ACCEPT || task.Result.RetCode == MEMORY_LIMIT) {
 		task.Result.RetCode = TIME_LIMIT
@@ -352,6 +415,14 @@ func (task *RunningTask) outOfTime() bool {
 		log.Infof("TLE: Time limit: %d, time cost: %d", task.timeLimit, task.Result.TimeCost)
 	}
 	return isTLE
+}
+
+func (task *RunningTask) outOfWallClockTime() bool {
+	if !task.wallClockTimedOut.Load() {
+		return false
+	}
+	log.Infof("TLE: wall-clock time limit: %dus", task.timeLimit)
+	return true
 }
 
 func (task *RunningTask) outOfMemory() bool {

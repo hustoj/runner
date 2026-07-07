@@ -58,6 +58,7 @@ testall: prepare
 	cd tests/thread;make
 	cd tests/tle;make
 	cd tests/tle2;make
+	cd tests/wall-clock-tle;make
 	cd tests/zero;make
 	cd tests/ole;make
 	cd tests/prlimit-ole;make

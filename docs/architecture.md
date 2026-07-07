@@ -141,14 +141,14 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 | 资源 | 判杰口径 | 内核兜底 |
 |---|---|---|
-| CPU | 所有 tracee 的 `utime + stime` 累加(**总 CPU,非 wall-clock**) | `RLIMIT_CPU = CPU+1`,`alarm = CPU+5` |
+| CPU | 所有 tracee 的 `utime + stime` 累加；父进程同时用 `CPU` 秒作为 wall-clock 硬截止 | 父进程 watchdog 杀 task cgroup / 进程组；子进程仍保留 `RLIMIT_CPU = CPU+1`,`alarm = CPU+5` |
 | Memory | `/proc/<pid>/status` 的 `VmHWM` 按 thread group 去重汇总 + rusage 兜底 + 扣除 root tracee 的 bootstrap RSS 基线 | `RLIMIT_DATA = RLIMIT_AS = Memory+MemoryReserve` |
 | Output | — | `RLIMIT_FSIZE = Output`,SIGXFSZ → OUTPUT_LIMIT |
 | Stack | — | `RLIMIT_STACK = Stack` |
 
-- **CPU 是总 CPU 时间**:多线程并行时该值可能明显大于 wall-clock。
+- **CPU rusage 与 wall-clock 同时生效**:多线程并行时 CPU rusage 可能明显大于 wall-clock；低 CPU 阻塞时由父进程 wall-clock watchdog 保证不会挂住 worker。
 - **Memory 双来源**:[`refreshPeakMemoryFromProc`](../runner/exec.go) 遍历 active pid 读 `/proc/status` 的 `VmHWM`,按 Tgid 去重取每组峰值再求和;[`process.Memory`](../runner/process.go) 来自 `wait4` 的 `ru_maxrss`,按 thread group 聚合并扣除 bootstrap 基线偏移。两者取 `max` 作为 `PeakMemory`。
-- **hybrid event-only 采样粒度较粗**:hybrid 不再在每个普通 syscall enter/exit stop 醒来，因此 `checkLimit` 只会在 ptrace event、信号停靠、退出等路径运行；最终判定仍依赖 `RLIMIT_CPU` / `alarm` / cgroup v2 memory 状态兜底。
+- **hybrid event-only 采样粒度较粗**:hybrid 不再在每个普通 syscall enter/exit stop 醒来，因此 `checkLimit` 只会在 ptrace event、信号停靠、退出等路径运行；最终判定仍依赖父进程 wall-clock watchdog / `RLIMIT_CPU` / cgroup v2 memory 状态兜底。
 
 完整字段语义、双层关系与事件归类见 [runner/resource-limits.md](runner/resource-limits.md)。
 

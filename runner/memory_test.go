@@ -20,6 +20,10 @@ func (controller fakeTaskController) MovePID(pid int) error {
 	return nil
 }
 
+func (controller fakeTaskController) Kill() error {
+	return nil
+}
+
 func (controller fakeTaskController) Cleanup() error {
 	return nil
 }

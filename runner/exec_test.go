@@ -111,6 +111,23 @@ func TestApplyTerminationSignalKeepsRuntimeErrorForSIGKILLWithinLimits(t *testin
 	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
 }
 
+func TestApplyTerminationSignalTreatsSIGKILLAsTimeLimitWhenWallClockWatchdogFired(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result:    &Result{},
+		timeLimit: 1_000_000,
+	}
+	task.Result.Init()
+	task.Result.TimeCost = 0
+	task.wallClockTimedOut.Store(true)
+
+	task.applyTerminationSignal(syscall.SIGKILL)
+
+	assert.Equal(t, TIME_LIMIT, task.Result.RetCode)
+}
+
 func TestApplyTerminationSignalTreatsSIGKILLAsMemoryLimitWhenControllerExceeded(t *testing.T) {
 	SetLogger(zap.NewNop().Sugar())
 	defer SetLogger(nil)
@@ -150,4 +167,21 @@ func TestCheckPromotesRuntimeErrorToMemoryLimitWhenControllerExceeded(t *testing
 	task.check()
 
 	assert.Equal(t, MEMORY_LIMIT, task.Result.RetCode)
+}
+
+func TestCheckPromotesRuntimeErrorToTimeLimitWhenWallClockWatchdogFired(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	task := RunningTask{
+		Result: &Result{
+			RetCode: RUNTIME_ERROR,
+		},
+		timeLimit: 1_000_000,
+	}
+	task.wallClockTimedOut.Store(true)
+
+	task.check()
+
+	assert.Equal(t, TIME_LIMIT, task.Result.RetCode)
 }

@@ -8,8 +8,6 @@ import (
 	"unsafe"
 )
 
-const prSetNoNewPrivs = PrSetNoNewPrivs
-
 // SandboxConfig defines the security isolation parameters for child processes.
 // It controls privilege dropping, filesystem isolation, and namespace creation.
 type SandboxConfig struct {
@@ -172,7 +170,7 @@ func applySandboxNoNewPrivs(spec childSandboxSpec) childStartupFailure {
 	if !spec.noNewPrivs {
 		return childStartupFailure{}
 	}
-	_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(prSetNoNewPrivs), 1, 0, 0, 0, 0)
+	_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, uintptr(PrSetNoNewPrivs), 1, 0, 0, 0, 0)
 	if errno != 0 {
 		return childStartupFailure{stage: childStageSandboxNoNewPrivs, errno: errno}
 	}

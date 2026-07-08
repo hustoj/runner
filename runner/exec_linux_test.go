@@ -386,3 +386,34 @@ func TestOpenChildIOFilesCreatesSecureOutputFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestRetryOnEINTRRetriesUntilNonEINTR(t *testing.T) {
+	calls := 0
+	err := retryOnEINTR(func() error {
+		calls++
+		if calls < 3 {
+			return syscall.EINTR
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retryOnEINTR() error = %v, want nil", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+}
+
+func TestRetryOnEINTRReturnsNonEINTRError(t *testing.T) {
+	calls := 0
+	err := retryOnEINTR(func() error {
+		calls++
+		return syscall.EINVAL
+	})
+	if err != syscall.EINVAL {
+		t.Fatalf("retryOnEINTR() error = %v, want EINVAL", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+}

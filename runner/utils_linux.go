@@ -11,6 +11,17 @@ import (
 	"syscall"
 )
 
+// retryOnEINTR calls fn repeatedly until it returns an error other than EINTR.
+// Only for parent-side use; the raw-fork child path must stay on hand-written
+// RawSyscall loops to avoid Go runtime dependencies.
+func retryOnEINTR(fn func() error) error {
+	for {
+		if err := fn(); err != syscall.EINTR {
+			return err
+		}
+	}
+}
+
 func fileDupErr(f1 *os.File, f2 *os.File) error {
 	if err := syscall.Dup3(int(f1.Fd()), int(f2.Fd()), 0); err != nil {
 		_ = f1.Close()

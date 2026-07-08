@@ -427,13 +427,10 @@ func readChildStartupFailure(fd int) (childStartupFailure, error) {
 func waitChildStartupFailure(pid int) {
 	var status syscall.WaitStatus
 	var rusage syscall.Rusage
-	for {
+	_ = retryOnEINTR(func() error {
 		_, err := wait4ChildStartup(pid, &status, 0, &rusage)
-		if err == syscall.EINTR {
-			continue
-		}
-		return
-	}
+		return err
+	})
 }
 
 func shouldSyncSeccompTracee(spec childSeccompSpec) bool {
@@ -474,19 +471,18 @@ func prepareHybridSeccompTracee(pid int) error {
 func waitForTraceeStop(pid int) (syscall.WaitStatus, error) {
 	var status syscall.WaitStatus
 	var rusage syscall.Rusage
-	for {
-		waitedPID, err := syscall.Wait4(pid, &status, 0, &rusage)
-		if err == syscall.EINTR {
-			continue
-		}
-		if err != nil {
-			return 0, err
-		}
-		if waitedPID != pid {
-			return 0, fmt.Errorf("wait4 returned pid %d, want %d", waitedPID, pid)
-		}
-		return status, nil
+	var waitedPID int
+	if err := retryOnEINTR(func() error {
+		var err error
+		waitedPID, err = syscall.Wait4(pid, &status, 0, &rusage)
+		return err
+	}); err != nil {
+		return 0, err
 	}
+	if waitedPID != pid {
+		return 0, fmt.Errorf("wait4 returned pid %d, want %d", waitedPID, pid)
+	}
+	return status, nil
 }
 
 func isPtraceEvent(status syscall.WaitStatus, event int) bool {
@@ -528,19 +524,18 @@ func releaseChildCgroupGate(fd int) error {
 	defer func() {
 		_ = syscall.Close(fd)
 	}()
-	for {
-		n, err := writeChildCgroupGate(fd, []byte{1})
-		if err == syscall.EINTR {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return io.ErrShortWrite
-		}
-		return nil
+	var n int
+	if err := retryOnEINTR(func() error {
+		var err error
+		n, err = writeChildCgroupGate(fd, []byte{1})
+		return err
+	}); err != nil {
+		return err
 	}
+	if n != 1 {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteFD, gatePipeReadFD, gatePipeWriteFD int) {
@@ -647,6 +642,9 @@ func dupToStandardFD(sourceFD int, targetFD int) syscall.Errno {
 	return 0
 }
 
+// childStartupReportFD is the fixed fd the child moves the startup pipe to
+// before closing all other inherited fds via close_range. Chosen as 3 (the
+// lowest fd after stdin/stdout/stderr) so dup3 + close_range(4..) is safe.
 const childStartupReportFD = 3
 
 func closeNonStdioFilesExceptStartupPipe(startupPipeWriteFD int) (int, syscall.Errno) {

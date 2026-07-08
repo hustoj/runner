@@ -247,6 +247,10 @@ func (task *RunningTask) runProcess() (err error) {
 		waitChildStartupFailure(pid)
 		return fmt.Errorf("release child cgroup gate: %w", err)
 	}
+	// This hands the child's ptrace state to prepareHybridSeccompTracee.
+	// See its doc comment: nothing between releaseChildCgroupGate and this
+	// call may wait4/ptraceCont/ptraceSetOptions the child, or the first
+	// group-stop it waits for will already be consumed.
 	if shouldSyncSeccompTracee(spec.seccomp) {
 		if err := prepareHybridSeccompTracee(pid); err != nil {
 			_ = syscall.Close(startupPipeFDs[0])
@@ -451,6 +455,12 @@ func shouldSyncSeccompTracee(spec childSeccompSpec) bool {
 	return spec.enabled && len(spec.traceSyscalls) > 0
 }
 
+// prepareHybridSeccompTracee drives the hybrid seccomp handshake: wait for the
+// child's self-SIGSTOP group-stop, arm PTRACE_O_TRACESECCOMP, then wait for the
+// execve-triggered seccomp event. It owns the child's ptrace state for the
+// duration -- the tracee must arrive at the first group-stop unconsumed, and no
+// wait4/ptraceCont/ptraceSetOptions may run against the child between
+// releaseChildCgroupGate and this call, nor between its two wait/continue cycles.
 func prepareHybridSeccompTracee(pid int) error {
 	status, err := waitForTraceeStop(pid)
 	if err != nil {

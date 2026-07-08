@@ -189,11 +189,13 @@ func (config *CompileConfig) ResolveExec() (string, []string, error) {
 	return binary, args, nil
 }
 
-func loadConfig() *CompileConfig {
+func loadConfig() (*CompileConfig, error) {
 	m := multiconfig.NewWithPath("compile.json")
 	compileConfig := new(CompileConfig)
-	m.MustLoad(compileConfig)
-	return compileConfig
+	if err := m.Load(compileConfig); err != nil {
+		return nil, err
+	}
+	return compileConfig, nil
 }
 
 // ValidateSandbox checks sandbox configuration consistency.

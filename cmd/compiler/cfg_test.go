@@ -222,6 +222,18 @@ func TestLoadConfigRejectsInvalidArgsJSONType(t *testing.T) {
 	})
 }
 
+func TestLoadConfigReturnsErrorOnInvalidJSON(t *testing.T) {
+	runWithTempCompileJSON(t, `{invalid json`, func(_ string) {
+		cfg, err := loadConfig()
+		if err == nil {
+			t.Fatal("loadConfig() error = nil, want error for invalid compile.json")
+		}
+		if cfg != nil {
+			t.Fatalf("loadConfig() cfg = %v, want nil on error", cfg)
+		}
+	})
+}
+
 func TestValidateSandboxRejectsMismatchedUIDGID(t *testing.T) {
 	withCompilerEffectiveUID(t, 1000)
 

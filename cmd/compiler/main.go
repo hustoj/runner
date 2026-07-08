@@ -25,7 +25,11 @@ func main() {
 		return
 	}
 
-	m := loadConfig()
+	m, err := loadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compiler: load config: %v\n", err)
+		os.Exit(1)
+	}
 	initLog(m)
 	r := handle(m)
 	res, _ := json.Marshal(r)

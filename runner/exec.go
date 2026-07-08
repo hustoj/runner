@@ -118,170 +118,237 @@ func (task *RunningTask) abortTrace() {
 	task.parseRunningInfo()
 }
 
+type traceContext struct {
+	process      *Process
+	tracer       *TracerDetect
+	traceSeccomp bool
+	resumeMode   traceResumeMode
+}
+
+type traceDecision uint8
+
+const (
+	traceStop traceDecision = iota
+	traceContinue
+)
+
 func (task *RunningTask) trace() error {
 	process := task.process
 	process.IsKilled = false
 
-	tracer := TracerDetect{}
-	tracer.RegisterTracee(task.process.Pid, false)
+	ctx, err := task.prepareTraceContext()
+	if err != nil {
+		return err
+	}
+	if task.prepareInitialTraceStop(ctx) {
+		task.runTraceLoop(ctx)
+	}
+	return task.finalizeTraceResult()
+}
 
+func (task *RunningTask) prepareTraceContext() (traceContext, error) {
+	process := task.process
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(process.Pid, false)
 	syscallPolicy, err := task.setting.compileSyscallPolicy()
 	if err != nil {
 		process.Kill()
-		return fmt.Errorf("compile syscall policy: %w", err)
+		return traceContext{}, fmt.Errorf("compile syscall policy: %w", err)
 	}
 	log.Debugf("allowed syscall is: %s", syscallPolicy.Ptrace.AllowedCalls)
 	policy, err := makeCallPolicy(syscallPolicy.Ptrace)
 	if err != nil {
 		process.Kill()
-		return fmt.Errorf("build call policy: %w", err)
+		return traceContext{}, fmt.Errorf("build call policy: %w", err)
 	}
 	tracer.setCallPolicy(policy)
 	tracer.consumeBootstrapCall(syscall.SYS_EXECVE)
 
+	return traceContext{
+		process:      process,
+		tracer:       tracer,
+		traceSeccomp: task.traceSeccompEvents(),
+		resumeMode:   task.traceResumeMode(),
+	}, nil
+}
+
+func (task *RunningTask) prepareInitialTraceStop(ctx traceContext) bool {
+	process := ctx.process
 	alive, err := process.Wait()
 	if err != nil {
 		log.Infof("initial wait failed: %v", err)
 		task.abortTrace()
-		return task.finalizeTraceResult()
+		return false
 	}
 	if !alive {
-		return task.finalizeTraceResult()
+		return false
 	}
 	if process.Exited() {
 		log.Infof("program exited before tracing loop")
-		tracer.RemoveTracee(process.CurrentPid)
+		ctx.tracer.RemoveTracee(process.CurrentPid)
 		process.RemoveTracee(process.CurrentPid)
 		task.parseRunningInfo()
 		task.applyExitCode(process.Status)
-		return task.finalizeTraceResult()
+		return false
 	}
 	if !process.IsInitialTraceStop() {
 		task.handleBrokenTraceStop("unexpected initial ptrace stop")
-		return task.finalizeTraceResult()
+		return false
 	}
 	process.SetThreadGroup(process.Pid, process.Pid)
 	process.SetRusageOffset(process.Pid, process.Rusage.Maxrss)
-	traceSeccomp := task.traceSeccompEvents()
-	resumeMode := task.traceResumeMode()
-	if err := process.SetPtraceOptions(traceSeccomp); err != nil {
+	if err := process.SetPtraceOptions(ctx.traceSeccomp); err != nil {
 		log.Infof("PtraceSetOptions: err %v", err)
 		task.abortTrace()
-		return task.finalizeTraceResult()
+		return false
 	}
-	if !process.ContinueWithMode(resumeMode, 0) {
+	if !process.ContinueWithMode(ctx.resumeMode, 0) {
 		log.Infof("Program not alive after ptrace setup")
 		task.parseRunningInfo()
-		return task.finalizeTraceResult()
+		return false
 	}
+	return true
+}
 
+func (task *RunningTask) runTraceLoop(ctx traceContext) {
+	process := ctx.process
 	for {
-		alive, err = process.Wait()
+		alive, err := process.Wait()
 		if err != nil {
 			log.Infof("wait in trace loop failed: %v", err)
 			task.abortTrace()
-			break
+			return
 		}
 		if !alive {
-			break
+			return
 		}
 
-		if process.Exited() {
-			log.Infof("program exited! pid=%d", process.CurrentPid)
-			tracer.RemoveTracee(process.CurrentPid)
-			process.RemoveTracee(process.CurrentPid)
-			task.parseRunningInfo()
-			// Only the root process exit code determines the result; child threads
-			// (e.g. JVM daemon threads) may legitimately exit with non-zero codes.
-			if process.CurrentPid == process.Pid {
-				task.applyExitCode(process.Status)
-			}
-			if !process.HasActiveTracees() {
-				break
-			}
-			continue
+		if task.handleTraceStop(ctx) == traceStop {
+			return
 		}
-		if tracer.ConsumeAttachStop(process.CurrentPid, process.Status) {
-			if err := process.SetPtraceOptions(traceSeccomp); err != nil {
-				log.Infof("PtraceSetOptions(new child): err %v", err)
-				task.abortTrace()
-				break
-			}
-			if !process.ContinueWithMode(resumeMode, 0) {
-				log.Infof("Program not alive after child attach stop")
-				task.parseRunningInfo()
-				break
-			}
-			continue
-		}
-		if process.IsPtraceEventStop() {
-			if !task.handlePtraceEvent(process, &tracer) {
-				break
-			}
-			if !process.ContinueWithMode(resumeMode, 0) {
-				log.Infof("Program not alive after ptrace event")
-				task.parseRunningInfo()
-				break
-			}
-			continue
-		}
-		if !process.IsSyscallStop() {
-			// Signal-delivery stop: forward the signal so the process can handle it.
-			// This is required for runtimes like the JVM that use SIGSEGV internally.
-			// If the process has no handler, it will be killed by the signal and the
-			// subsequent Signaled() status is caught on the next Wait iteration.
-			if process.Status.Stopped() {
-				sig := process.Status.StopSignal()
-				task.parseRunningInfo()
-				if task.applyOutputLimitSignal(sig) {
-					log.Debugf("kill by output limit signal: %v", sig)
-					process.Kill()
-					break
-				}
-				task.checkLimit()
-				if process.IsKilled {
-					break
-				}
-				log.Debugf("forwarding signal %v to pid=%d", sig, process.CurrentPid)
-				if !process.ContinueWithMode(resumeMode, int(sig)) {
-					log.Infof("Program not alive after signal forward")
-					task.parseRunningInfo()
-					break
-				}
-				continue
-			}
-			task.handleBrokenTraceStop("unexpected non-syscall ptrace stop")
-			break
-		}
+	}
+}
 
-		checkResult := tracer.checkSyscall(process.CurrentPid)
-		if checkResult == syscallCheckViolation {
-			log.Debugf("------- check syscall failed")
-			task.abortTrace()
-			break
-		}
-		if checkResult == syscallCheckTraceeGone {
-			log.Debugf("skip syscall inspection for pid=%d because tracee is already gone", process.CurrentPid)
-			task.parseRunningInfo()
-			task.checkLimit()
-			continue
-		}
-		if checkResult == syscallCheckTracerError {
-			log.Warnf("ptrace register read failed for pid=%d", process.CurrentPid)
-			task.abortTrace()
-			break
-		}
-		// before next ptrace, get result, always pass
+func (task *RunningTask) handleTraceStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	switch {
+	case process.Exited():
+		return task.handleExitedStop(ctx)
+	case ctx.tracer.ConsumeAttachStop(process.CurrentPid, process.Status):
+		return task.handleAttachStop(ctx)
+	case process.IsPtraceEventStop():
+		return task.handlePtraceEventStop(ctx)
+	case !process.IsSyscallStop():
+		return task.handleSignalOrBrokenStop(ctx)
+	default:
+		return task.handleSyscallStop(ctx)
+	}
+}
+
+func (task *RunningTask) handleExitedStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	log.Infof("program exited! pid=%d", process.CurrentPid)
+	ctx.tracer.RemoveTracee(process.CurrentPid)
+	process.RemoveTracee(process.CurrentPid)
+	task.parseRunningInfo()
+	// Only the root process exit code determines the result; child threads
+	// (e.g. JVM daemon threads) may legitimately exit with non-zero codes.
+	if process.CurrentPid == process.Pid {
+		task.applyExitCode(process.Status)
+	}
+	if !process.HasActiveTracees() {
+		return traceStop
+	}
+	return traceContinue
+}
+
+func (task *RunningTask) handleAttachStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	if err := process.SetPtraceOptions(ctx.traceSeccomp); err != nil {
+		log.Infof("PtraceSetOptions(new child): err %v", err)
+		task.abortTrace()
+		return traceStop
+	}
+	if !process.ContinueWithMode(ctx.resumeMode, 0) {
+		log.Infof("Program not alive after child attach stop")
+		task.parseRunningInfo()
+		return traceStop
+	}
+	return traceContinue
+}
+
+func (task *RunningTask) handlePtraceEventStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	if !task.handlePtraceEvent(ctx) {
+		return traceStop
+	}
+	if !process.ContinueWithMode(ctx.resumeMode, 0) {
+		log.Infof("Program not alive after ptrace event")
+		task.parseRunningInfo()
+		return traceStop
+	}
+	return traceContinue
+}
+
+func (task *RunningTask) handleSignalOrBrokenStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	if !process.Status.Stopped() {
+		task.handleBrokenTraceStop("unexpected non-syscall ptrace stop")
+		return traceStop
+	}
+
+	// Signal-delivery stop: forward the signal so the process can handle it.
+	// This is required for runtimes like the JVM that use SIGSEGV internally.
+	// If the process has no handler, it will be killed by the signal and the
+	// subsequent Signaled() status is caught on the next Wait iteration.
+	sig := process.Status.StopSignal()
+	task.parseRunningInfo()
+	if task.applyOutputLimitSignal(sig) {
+		log.Debugf("kill by output limit signal: %v", sig)
+		process.Kill()
+		return traceStop
+	}
+	task.checkLimit()
+	if process.IsKilled {
+		return traceStop
+	}
+	log.Debugf("forwarding signal %v to pid=%d", sig, process.CurrentPid)
+	if !process.ContinueWithMode(ctx.resumeMode, int(sig)) {
+		log.Infof("Program not alive after signal forward")
+		task.parseRunningInfo()
+		return traceStop
+	}
+	return traceContinue
+}
+
+func (task *RunningTask) handleSyscallStop(ctx traceContext) traceDecision {
+	process := ctx.process
+	checkResult := ctx.tracer.checkSyscall(process.CurrentPid)
+	if checkResult == syscallCheckViolation {
+		log.Debugf("------- check syscall failed")
+		task.abortTrace()
+		return traceStop
+	}
+	if checkResult == syscallCheckTraceeGone {
+		log.Debugf("skip syscall inspection for pid=%d because tracee is already gone", process.CurrentPid)
 		task.parseRunningInfo()
 		task.checkLimit()
-
-		if !process.ContinueWithMode(resumeMode, 0) {
-			log.Infof("Program not alive! break")
-			break
-		}
-
+		return traceContinue
 	}
-	return task.finalizeTraceResult()
+	if checkResult == syscallCheckTracerError {
+		log.Warnf("ptrace register read failed for pid=%d", process.CurrentPid)
+		task.abortTrace()
+		return traceStop
+	}
+	// before next ptrace, get result, always pass
+	task.parseRunningInfo()
+	task.checkLimit()
+
+	if !process.ContinueWithMode(ctx.resumeMode, 0) {
+		log.Infof("Program not alive! break")
+		return traceStop
+	}
+	return traceContinue
 }
 
 func (task *RunningTask) traceSeccompEvents() bool {
@@ -295,39 +362,53 @@ func (task *RunningTask) traceResumeMode() traceResumeMode {
 	return traceResumeSyscallStops
 }
 
-func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetect) bool {
+func (task *RunningTask) handlePtraceEvent(ctx traceContext) bool {
+	process := ctx.process
 	switch process.PtraceEvent() {
 	case ptraceEventClone, ptraceEventFork, ptraceEventVFork:
-		newPid, err := process.GetEventPid()
-		if err != nil {
-			log.Infof("PtraceGetEventMsg failed: %v", err)
-			task.abortTrace()
-			return false
-		}
-		process.AddTracee(newPid)
-		if process.PtraceEvent() != ptraceEventClone {
-			process.SetThreadGroup(newPid, newPid)
-		}
-		tracer.RegisterTracee(newPid, true)
-		log.Infof("registered traced child pid=%d from event=%d", newPid, process.PtraceEvent())
+		return task.handleForkLikePtraceEvent(ctx)
 	case ptraceEventSeccomp:
-		checkResult := tracer.checkSeccompTrace(process.CurrentPid)
-		if checkResult == syscallCheckViolation {
-			log.Debugf("------- check seccomp-traced syscall failed")
-			task.abortTrace()
-			return false
-		}
-		if checkResult == syscallCheckTraceeGone {
-			log.Debugf("skip seccomp trace inspection for pid=%d because tracee is already gone", process.CurrentPid)
-			return true
-		}
-		if checkResult == syscallCheckTracerError {
-			log.Warnf("ptrace register read failed for seccomp event pid=%d", process.CurrentPid)
-			task.abortTrace()
-			return false
-		}
+		return task.handleSeccompEvent(ctx)
 	default:
 		log.Warnf("unhandled ptrace event %d on pid=%d", process.PtraceEvent(), process.CurrentPid)
+	}
+	return true
+}
+
+func (task *RunningTask) handleForkLikePtraceEvent(ctx traceContext) bool {
+	process := ctx.process
+	event := process.PtraceEvent()
+	newPid, err := process.GetEventPid()
+	if err != nil {
+		log.Infof("PtraceGetEventMsg failed: %v", err)
+		task.abortTrace()
+		return false
+	}
+	process.AddTracee(newPid)
+	if event != ptraceEventClone {
+		process.SetThreadGroup(newPid, newPid)
+	}
+	ctx.tracer.RegisterTracee(newPid, true)
+	log.Infof("registered traced child pid=%d from event=%d", newPid, event)
+	return true
+}
+
+func (task *RunningTask) handleSeccompEvent(ctx traceContext) bool {
+	process := ctx.process
+	checkResult := ctx.tracer.checkSeccompTrace(process.CurrentPid)
+	if checkResult == syscallCheckViolation {
+		log.Debugf("------- check seccomp-traced syscall failed")
+		task.abortTrace()
+		return false
+	}
+	if checkResult == syscallCheckTraceeGone {
+		log.Debugf("skip seccomp trace inspection for pid=%d because tracee is already gone", process.CurrentPid)
+		return true
+	}
+	if checkResult == syscallCheckTracerError {
+		log.Warnf("ptrace register read failed for seccomp event pid=%d", process.CurrentPid)
+		task.abortTrace()
+		return false
 	}
 	return true
 }

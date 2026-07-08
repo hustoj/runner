@@ -24,8 +24,10 @@ func waitOptions() int {
 }
 
 var (
-	ptraceSyscallCall = syscall.PtraceSyscall
-	ptraceContCall    = syscall.PtraceCont
+	ptraceSyscallCall     = syscall.PtraceSyscall
+	ptraceContCall        = syscall.PtraceCont
+	ptraceGetEventMsgCall = syscall.PtraceGetEventMsg
+	ptraceSetOptionsCall  = syscall.PtraceSetOptions
 )
 
 func (process *Process) Continue() bool {
@@ -76,7 +78,7 @@ func (process *Process) PtraceEvent() int {
 }
 
 func (process *Process) GetEventPid() (int, error) {
-	msg, err := syscall.PtraceGetEventMsg(process.CurrentPid)
+	msg, err := ptraceGetEventMsgCall(process.CurrentPid)
 	return int(msg), err
 }
 
@@ -89,5 +91,5 @@ func setPtraceOptions(pid int, traceSeccomp bool) error {
 	if traceSeccomp {
 		options |= unix.PTRACE_O_TRACESECCOMP
 	}
-	return syscall.PtraceSetOptions(pid, options)
+	return ptraceSetOptionsCall(pid, options)
 }

@@ -376,3 +376,64 @@ func TestAbortTraceSetsRuntimeErrorAndRefreshesResources(t *testing.T) {
 	// RusageMemory should reflect Maxrss from the recorded rusage.
 	assert.Equal(t, int64(4096), task.Result.RusageMemory)
 }
+
+func TestHandleExitedStopKeepsAcceptForNonRootTraceeExit(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	process := NewProcess(100)
+	process.AddTracee(101)
+	process.CurrentPid = 101
+	process.Status = waitStatusForExit(t, 1)
+
+	task := RunningTask{
+		process: process,
+		Result:  &Result{},
+	}
+	task.Result.Init()
+
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+	tracer.RegisterTracee(101, false)
+	ctx := traceContext{
+		process: process,
+		tracer:  tracer,
+	}
+
+	decision := task.handleExitedStop(ctx)
+
+	assert.Equal(t, traceContinue, decision)
+	assert.Equal(t, ACCEPT, task.Result.RetCode)
+	assert.True(t, process.HasTracee(100))
+	assert.False(t, process.HasTracee(101))
+	assert.False(t, tracer.HasTracee(101))
+}
+
+func TestHandleExitedStopAppliesRootExitCodeAndStopsWhenNoTracees(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	process := NewProcess(100)
+	process.CurrentPid = 100
+	process.Status = waitStatusForExit(t, 1)
+
+	task := RunningTask{
+		process: process,
+		Result:  &Result{},
+	}
+	task.Result.Init()
+
+	tracer := &TracerDetect{}
+	tracer.RegisterTracee(100, false)
+	ctx := traceContext{
+		process: process,
+		tracer:  tracer,
+	}
+
+	decision := task.handleExitedStop(ctx)
+
+	assert.Equal(t, traceStop, decision)
+	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
+	assert.False(t, process.HasActiveTracees())
+	assert.False(t, tracer.HasTracee(100))
+}

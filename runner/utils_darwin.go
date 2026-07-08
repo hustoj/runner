@@ -13,10 +13,6 @@ func darwinDevelopmentOnlyError(feature string) error {
 	return fmt.Errorf("%s is unavailable on darwin: %s", feature, darwinDevelopmentOnlyMessage)
 }
 
-func panicDarwinDevelopmentOnly(feature string) {
-	panic(darwinDevelopmentOnlyError(feature))
-}
-
 func openFileNoFollow(filename string, flag int, perm uint32) (*os.File, error) {
 	return os.OpenFile(filename, flag, os.FileMode(perm))
 }

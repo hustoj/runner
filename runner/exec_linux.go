@@ -406,6 +406,11 @@ func closePipeFDs(pipeFDs [2]int) {
 	}
 }
 
+// readChildStartupFailure reads the fixed 8-byte child startup failure struct
+// from the pipe. The EINTR retry is hand-written on purpose: retryOnEINTR only
+// surfaces an error and cannot express "partial read succeeded, keep going until
+// all 8 bytes are read", nor the n==0 EOF branching below. So the unified helper
+// does not fit this call site.
 func readChildStartupFailure(fd int) (childStartupFailure, error) {
 	var raw [8]byte
 	read := 0

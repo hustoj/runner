@@ -180,6 +180,26 @@ func TestSetCompileAlarmPropagatesSetitimerError(t *testing.T) {
 	}
 }
 
+func TestCompilerWallClockTimeoutSeconds(t *testing.T) {
+	tests := []struct {
+		name string
+		cpu  int
+		want int
+	}{
+		{name: "negative cpu uses buffer only", cpu: -1, want: 2},
+		{name: "zero cpu uses buffer only", cpu: 0, want: 2},
+		{name: "positive cpu uses multiplier plus buffer", cpu: 5, want: 17},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compilerWallClockTimeoutSeconds(tt.cpu); got != tt.want {
+				t.Fatalf("compilerWallClockTimeoutSeconds(%d) = %d, want %d", tt.cpu, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSetNoNewPrivsSucceeds(t *testing.T) {
 	// prctl(PR_SET_NO_NEW_PRIVS, 1) should succeed for any process.
 	errno := setNoNewPrivs()

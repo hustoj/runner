@@ -221,7 +221,7 @@ func (process *Process) GetTimeCost() int64 {
 		// Timeval.Usec is int32 on darwin and int64 on linux; the int64()
 		// conversion is required for darwin and reported as redundant on linux.
 		uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec) //nolint:unconvert // cross-platform: Usec type differs
-		total += uSec + (ru.Utime.Sec+ru.Stime.Sec)*1e6
+		total += uSec + (ru.Utime.Sec+ru.Stime.Sec)*microsPerSecond
 	}
 	return total
 }

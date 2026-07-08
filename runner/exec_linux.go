@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"syscall"
 	"unsafe"
@@ -42,6 +43,14 @@ const (
 	childStagePtraceSync
 	childStageSeccomp
 	childStageExec
+)
+
+const (
+	cpuLimitBufferSeconds   uint64 = 1
+	outputLimitOverflowByte uint64 = 1
+	defaultOpenFileLimit    uint64 = 16
+	coreDumpDisabled        uint64 = 0
+	alarmBufferSeconds      uint64 = 5
 )
 
 type childStartupFailure struct {
@@ -290,11 +299,11 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 	cpuTimeLimit := uint64(task.setting.CPU)
 	wallClockLimit := uint64(task.setting.effectiveWallClockLimitSeconds())
 	stackLimit := uint64(task.setting.Stack) << 20
-	enforcedCPULimit := cpuTimeLimit + 1
+	enforcedCPULimit := cpuTimeLimit + cpuLimitBufferSeconds
 	configuredOutputLimit := uint64(task.setting.Output) << 20
 	enforcedOutputLimit := configuredOutputLimit
-	if enforcedOutputLimit < ^uint64(0) {
-		enforcedOutputLimit++
+	if enforcedOutputLimit < math.MaxUint64 {
+		enforcedOutputLimit += outputLimitOverflowByte
 	}
 
 	return childProcessSpec{
@@ -315,14 +324,14 @@ func (task *RunningTask) prepareChildProcessSpec() (childProcessSpec, error) {
 			Cur: stackLimit,
 		},
 		noFileLimit: syscall.Rlimit{
-			Max: 16,
-			Cur: 16,
+			Max: defaultOpenFileLimit,
+			Cur: defaultOpenFileLimit,
 		},
 		coreLimit: syscall.Rlimit{
-			Max: 0,
-			Cur: 0,
+			Max: coreDumpDisabled,
+			Cur: coreDumpDisabled,
 		},
-		alarmSeconds: wallClockLimit + 5,
+		alarmSeconds: wallClockLimit + alarmBufferSeconds,
 	}, nil
 }
 
@@ -364,14 +373,14 @@ func openChildIOFiles() (childIOFiles, error) {
 	}
 	ioFiles.stdin = stdin
 
-	stdout, err := openChildIOFile("user.out", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0o600)
+	stdout, err := openChildIOFile("user.out", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, outputFilePerm)
 	if err != nil {
 		closeChildIOFiles(ioFiles)
 		return childIOFiles{}, err
 	}
 	ioFiles.stdout = stdout
 
-	stderr, err := openChildIOFile("user.err", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0o600)
+	stderr, err := openChildIOFile("user.err", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, outputFilePerm)
 	if err != nil {
 		closeChildIOFiles(ioFiles)
 		return childIOFiles{}, err

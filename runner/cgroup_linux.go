@@ -18,6 +18,7 @@ const (
 	defaultCgroupMountRoot      = "/sys/fs/cgroup"
 	cgroupMountEnv              = "RUNNER_CGROUP_MOUNT"
 	cgroupParentEnv             = "RUNNER_CGROUP_PARENT"
+	cgroupDirMode               = os.FileMode(0o755)
 	cgroupKillDrainTimeout      = time.Second
 	cgroupKillDrainPollInterval = 10 * time.Millisecond
 )
@@ -52,7 +53,7 @@ func newCgroupTaskController(limitMB int, maxProcs int) (*cgroupTaskController, 
 	controller := &cgroupTaskController{
 		path: filepath.Join(parentPath, taskCgroupName()),
 	}
-	if err := os.Mkdir(controller.path, 0o755); err != nil {
+	if err := os.Mkdir(controller.path, cgroupDirMode); err != nil {
 		return nil, fmt.Errorf("create task cgroup %q: %w", controller.path, err)
 	}
 	if err := controller.configure(limitMB, maxProcs); err != nil {

@@ -24,7 +24,7 @@ func dupFileForRead(filename string, file *os.File) error {
 }
 
 func dupFileForWrite(filename string, file *os.File) error {
-	fout, err := openFileNoFollow(filename, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0o600)
+	fout, err := openFileNoFollow(filename, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, outputFilePerm)
 	if err != nil {
 		return err
 	}

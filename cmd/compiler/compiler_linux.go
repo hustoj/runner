@@ -27,10 +27,19 @@ const (
 	compileExitExecFailure  = 126
 )
 
+const (
+	compilerCPULimitBufferSeconds   uint64 = 1
+	compilerOpenFileLimit           uint64 = 64
+	compilerCoreDumpDisabled        uint64 = 0
+	compilerKillGraceTimeoutSeconds        = 2
+	compilerWallClockMultiplier            = 3
+	compilerWallClockBufferSeconds         = 2
+)
+
 var (
 	compilerSetitimer             = unix.Setitimer
 	compilerWait4                 = syscall.Wait4
-	compilerKillGraceTimeout      = 2 * time.Second
+	compilerKillGraceTimeout      = time.Duration(compilerKillGraceTimeoutSeconds) * time.Second
 	startCompilerBootstrapProcess = startCompileBootstrapProcess
 	newCompilerTaskController     = func(cfg *CompileConfig) (runner.TaskController, error) {
 		return runner.NewCgroupTaskController(cfg.Memory, cfg.MaxProcs)
@@ -64,7 +73,7 @@ func infof(format string, args ...interface{}) {
 }
 
 func setrLimits(cpu, memory, output, stack uint64) error {
-	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + 1, Cur: cpu}); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Max: cpu + compilerCPULimitBufferSeconds, Cur: cpu}); err != nil {
 		return err
 	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Max: output << 20, Cur: output << 20}); err != nil {
@@ -76,10 +85,10 @@ func setrLimits(cpu, memory, output, stack uint64) error {
 	if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Max: memory << 20, Cur: memory << 20}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Max: 64, Cur: 64}); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Max: compilerOpenFileLimit, Cur: compilerOpenFileLimit}); err != nil {
 		return err
 	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Max: 0, Cur: 0}); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{Max: compilerCoreDumpDisabled, Cur: compilerCoreDumpDisabled}); err != nil {
 		return err
 	}
 	return setCompileAlarm(cpu)
@@ -98,9 +107,9 @@ func compilerWallClockTimeout(cpu int) time.Duration {
 
 func compilerWallClockTimeoutSeconds(cpu int) int {
 	if cpu < 0 {
-		return 2
+		return compilerWallClockBufferSeconds
 	}
-	return cpu*3 + 2
+	return cpu*compilerWallClockMultiplier + compilerWallClockBufferSeconds
 }
 
 func doCompile(cfg *CompileConfig) error {

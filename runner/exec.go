@@ -23,7 +23,7 @@ type RunningTask struct {
 
 func (task *RunningTask) Init(setting *TaskConfig) {
 	task.setting = setting
-	task.timeLimit = int64(setting.CPU) * 1e6
+	task.timeLimit = int64(setting.CPU) * microsPerSecond
 	task.memoryLimit = int64(setting.Memory) * 1024
 
 	task.Result = &Result{}
@@ -513,7 +513,7 @@ func (task *RunningTask) outOfWallClockTime() bool {
 
 func (task *RunningTask) wallClockLimitMicros() int64 {
 	if task.setting != nil {
-		return int64(task.setting.effectiveWallClockLimitSeconds()) * 1e6
+		return int64(task.setting.effectiveWallClockLimitSeconds()) * microsPerSecond
 	}
 	return task.timeLimit
 }

@@ -28,6 +28,10 @@ func main() {
 	}
 
 	result := task.GetResult()
-	content, _ := json.Marshal(result)
+	content, err := json.Marshal(result)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "runner: marshal result: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(content))
 }

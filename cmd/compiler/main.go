@@ -32,6 +32,10 @@ func main() {
 	}
 	initLog(m)
 	r := handle(m)
-	res, _ := json.Marshal(r)
+	res, err := json.Marshal(r)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compiler: marshal result: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println(string(res))
 }

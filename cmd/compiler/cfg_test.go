@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/koding/multiconfig"
@@ -468,6 +471,100 @@ func TestBootstrapConfigRoundTripPreservesFields(t *testing.T) {
 	}
 	if !got.UseMountNS || !got.UseIPCNS || !got.UseUTSNS || !got.UseNetNS {
 		t.Fatalf("namespace flags = mount:%v ipc:%v uts:%v net:%v", got.UseMountNS, got.UseIPCNS, got.UseUTSNS, got.UseNetNS)
+	}
+}
+
+func TestEncodeBootstrapConfigRejectsOversizedPayload(t *testing.T) {
+	oversized := strings.Repeat("x", compilerBootstrapConfigMaxBytes+1)
+	cfg := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs(oversized),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+
+	_, err := encodeBootstrapConfig(cfg)
+	if err == nil {
+		t.Fatal("encodeBootstrapConfig() should reject config exceeding size limit")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "exceeds limit") {
+		t.Fatalf("error %q should mention the limit", msg)
+	}
+	if !strings.Contains(msg, strconv.Itoa(compilerBootstrapConfigMaxBytes)) {
+		t.Fatalf("error %q should contain limit %d", msg, compilerBootstrapConfigMaxBytes)
+	}
+}
+
+func TestEncodeBootstrapConfigBoundaryAtLimit(t *testing.T) {
+	// 使用单字符 arg "x" 作为基础，便于精确计算填充长度：把 "x"（1 字节内容）
+	// 替换为 N 字节内容后，JSON 序列化大小变化为 (N - 1)。
+	base := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs("x"),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+	baseData, err := json.Marshal(base)
+	if err != nil {
+		t.Fatalf("marshal base config: %v", err)
+	}
+	fillLen := compilerBootstrapConfigMaxBytes - len(baseData) + 1
+	if fillLen <= 0 {
+		t.Fatalf("base config already too large: %d bytes", len(baseData))
+	}
+
+	atLimit := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs(strings.Repeat("a", fillLen)),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+	atLimitData, err := json.Marshal(atLimit)
+	if err != nil {
+		t.Fatalf("marshal at-limit config: %v", err)
+	}
+	if len(atLimitData) != compilerBootstrapConfigMaxBytes {
+		t.Fatalf("at-limit size = %d, want exactly %d (JSON layout drift?)",
+			len(atLimitData), compilerBootstrapConfigMaxBytes)
+	}
+	if _, err := encodeBootstrapConfig(atLimit); err != nil {
+		t.Fatalf("encodeBootstrapConfig() at exact limit should pass, got error: %v", err)
+	}
+
+	overLimit := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs(strings.Repeat("a", fillLen+1)),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+	overLimitData, err := json.Marshal(overLimit)
+	if err != nil {
+		t.Fatalf("marshal over-limit config: %v", err)
+	}
+	if len(overLimitData) != compilerBootstrapConfigMaxBytes+1 {
+		t.Fatalf("over-limit size = %d, want exactly %d (JSON layout drift?)",
+			len(overLimitData), compilerBootstrapConfigMaxBytes+1)
+	}
+	if _, err := encodeBootstrapConfig(overLimit); err == nil {
+		t.Fatal("encodeBootstrapConfig() 1 byte over limit should fail")
+	}
+}
+
+func TestEncodeBootstrapConfigAcceptsPayloadUnderLimit(t *testing.T) {
+	cfg := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs("main.c", "-o", "main"),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+
+	encoded, err := encodeBootstrapConfig(cfg)
+	if err != nil {
+		t.Fatalf("encodeBootstrapConfig() error = %v", err)
+	}
+	if encoded == "" {
+		t.Fatal("encodeBootstrapConfig() returned empty payload for valid config")
 	}
 }
 

@@ -165,6 +165,30 @@ func TestResolveExecReturnsErrorWhenCompilerBinaryMissing(t *testing.T) {
 	}
 }
 
+func TestStartCompileBootstrapProcessRejectsOversizedConfig(t *testing.T) {
+	oversized := strings.Repeat("x", compilerBootstrapConfigMaxBytes+1)
+	cfg := &CompileConfig{
+		Command:    "gcc",
+		Args:       newCompileArgs(oversized),
+		NoNewPrivs: true,
+		MaxProcs:   32,
+	}
+
+	pid, err := startCompileBootstrapProcess(cfg, nil)
+	if err == nil {
+		t.Fatal("startCompileBootstrapProcess() should fail for oversized config")
+	}
+	if pid != 0 {
+		// 防御：encode 失败应早于 StartProcess，不应有子进程残留
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("startCompileBootstrapProcess() pid = %d, want 0 (no child should be started)", pid)
+	}
+	if !strings.Contains(err.Error(), "encode bootstrap config") {
+		t.Fatalf("error %q should originate from encode bootstrap config", err.Error())
+	}
+}
+
 func TestSetCompileAlarmPropagatesSetitimerError(t *testing.T) {
 	oldSetitimer := compilerSetitimer
 	compilerSetitimer = func(which unix.ItimerWhich, it unix.Itimerval) (unix.Itimerval, error) {

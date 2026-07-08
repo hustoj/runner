@@ -15,6 +15,12 @@ import (
 
 const compilerBootstrapConfigEnv = "RUNNER_COMPILER_BOOTSTRAP_CONFIG"
 
+// compilerBootstrapConfigMaxBytes 限制 bootstrap 配置编码后的最大字节数。
+// Linux execve 对单个环境变量字符串有 MAX_ARG_STRLEN (32 * PAGE_SIZE = 128KB)
+// 上限，超限会返回 E2BIG 且经 os.StartProcess 包装后错误不直观。预留
+// "KEY=" 前缀与 NUL 终止符的开销，使整体环境变量字符串不超过 128KB。
+const compilerBootstrapConfigMaxBytes = 128*1024 - len(compilerBootstrapConfigEnv) - 2
+
 type CompileArgs struct {
 	values []string
 }
@@ -118,6 +124,12 @@ func encodeBootstrapConfig(config *CompileConfig) (string, error) {
 	data, err := json.Marshal(config)
 	if err != nil {
 		return "", err
+	}
+	if len(data) > compilerBootstrapConfigMaxBytes {
+		return "", fmt.Errorf(
+			"bootstrap config encoded size %d bytes exceeds limit %d bytes (consider trimming Args)",
+			len(data), compilerBootstrapConfigMaxBytes,
+		)
 	}
 	return string(data), nil
 }

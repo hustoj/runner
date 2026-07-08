@@ -135,19 +135,20 @@ ptrace 状态机的演进背景、相位模型和剩余风险详见 [ptrace-mini
 
 [sandbox_linux.go](../runner/sandbox_linux.go) 实现的隔离:支持 `CLONE_NEWNS/IPC/UTS/NET`(PIDNS 当前被显式拒绝),chroot 到指定根目录,`PR_SET_NO_NEW_PRIVS`,以及 `setgroups → setgid → setuid` 降权。`LoadConfig()` 和 `RunningTask.Run()` 都会执行启动安全校验：Linux 上 root 启动且未配置 `RunUID`/`RunGID` 时默认 fail-closed；显式 `AllowPrivilegedChild: true` 还需要环境变量 `RUNNER_ALLOW_UNSAFE_TEST_MODE=1` 二次确认，以避免生产环境误用。root 子进程在 sandbox 步骤后会 drop 全部 capability（含 `CAP_SYS_RESOURCE`），作为 defense-in-depth；但这不替代 `RunUID`/`RunGID` 降权或 chroot/namespace 隔离。详细设计与顺序依赖见 [sandbox-refactor-analysis.md](sandbox-refactor-analysis.md)。
 
-## 7. 资源判杰契约
+## 7. 资源判题契约
 
-`runner` 同时维护**判题层**和**内核兜底层**,两层故意不是同一数值——判题层决定最终 TLE/MLE,内核兜底层在判题层来不及介入时兜住失控进程。
+`runner` 对不同资源采用两种限制模型：`Memory` 的 enforcement 与 verdict 都来自 task cgroup；`MaxProcs` 是 task-local 的 cgroup 硬限制；`CPU` / `WallClock` / `Output` / `Stack` 仍保留“判题层 + 内核兜底层”的双层设计。
 
-| 资源 | 判杰口径 | 内核兜底 |
+| 资源 | 判题口径 | 约束来源 / 兜底 |
 |---|---|---|
 | CPU / WallClock | CPU 为所有 tracee 的 `utime + stime` 累加；WallClock 为父进程真实耗时硬截止，未配置时沿用 `CPU` | 父进程 watchdog 杀 task cgroup / 进程组；子进程保留 `RLIMIT_CPU = CPU+1`,`alarm = effective WallClock+5` |
-| Memory | `/proc/<pid>/status` 的 `VmHWM` 按 thread group 去重汇总 + rusage 兜底 + 扣除 root tracee 的 bootstrap RSS 基线 | `RLIMIT_DATA = RLIMIT_AS = Memory+MemoryReserve` |
+| Memory | `MEMORY_LIMIT` verdict 来自 cgroup v2 `memory.events` (`oom` / `oom_kill`)；`PeakMemory` 展示值来自 `memory.peak`；`RusageMemory` 仅作诊断 | task cgroup `memory.max` / `memory.oom.group` / `memory.events` / `memory.peak` |
+| MaxProcs | 无独立判题码；达到上限后新的 `clone()` / `clone3()` / `fork()` / `vfork()` 通常失败，最终结果取决于程序或运行时如何处理 | task cgroup `pids.max = MaxProcs` |
 | Output | — | `RLIMIT_FSIZE = Output`,SIGXFSZ → OUTPUT_LIMIT |
 | Stack | — | `RLIMIT_STACK = Stack` |
 
 - **CPU rusage 与 wall-clock 同时生效**:多线程并行时 CPU rusage 可能明显大于 wall-clock；低 CPU 阻塞时由父进程 wall-clock watchdog 保证不会挂住 worker。
-- **Memory 双来源**:[`refreshPeakMemoryFromProc`](../runner/exec.go) 遍历 active pid 读 `/proc/status` 的 `VmHWM`,按 Tgid 去重取每组峰值再求和;[`process.Memory`](../runner/process.go) 来自 `wait4` 的 `ru_maxrss`,按 thread group 聚合并扣除 bootstrap 基线偏移。两者取 `max` 作为 `PeakMemory`。
+- **Memory 统一口径**:Linux cgroup v2 路径下，最终 MLE 由 [`taskCtrl.MemoryStatus()`](../runner/exec.go) 读取 `memory.events` 判定，[`refreshFinalMemoryResult`](../runner/exec.go) 刷新 `memory.peak` 到 `PeakMemory`；[`process.Memory`](../runner/process.go) 聚合的 `ru_maxrss` 仍保留为 `RusageMemory` 诊断值。[`refreshPeakMemoryFromProc`](../runner/exec.go) 现在只是 fallback / 历史采样入口，不参与常规 Linux verdict。
 - **hybrid event-only 采样粒度较粗**:hybrid 不再在每个普通 syscall enter/exit stop 醒来，因此 `checkLimit` 只会在 ptrace event、信号停靠、退出等路径运行；最终判定仍依赖父进程 wall-clock watchdog / `RLIMIT_CPU` / cgroup v2 memory 状态兜底。
 
 完整字段语义、双层关系与事件归类见 [runner/resource-limits.md](runner/resource-limits.md)。
@@ -258,7 +259,7 @@ RUNTIME_ERROR=10, COMPILE_ERROR=11, COMPILE_OK=12, TEST_RUN=13
 
 - **seccomp 迁移**:当前已支持显式 `SyscallBackend: "hybrid"`，默认仍为 ptrace-only。后续纯 seccomp 方向见 [seccomp-bpf-migration.md](seccomp-bpf-migration.md)。主要难点仍是 `execve once` 语义与 seccomp allowlist 不兼容。
 - **ptrace 多 tracee 剩余风险**(资源统计仍是近似模型):见 [ptrace-minimal-fix.md](ptrace-minimal-fix.md)。
-- **资源限制待验证项**(`MemoryReserve` 余量是否覆盖各语言初始化、短生命周期 MLE 能否被 `/proc` 采样捕获、Java 多线程下 thread group 聚合准确性、`RLIMIT_AS` 过紧致 mmap 失败):见 [todo.md](todo.md)。
+- **资源限制待验证项**(cgroup v2 delegation 兼容性、managed runtime 总预算示例、额外 memory 诊断信息暴露):见 [todo.md](todo.md)。
 - **平台支持边界**(其它 Linux 架构可编译但启动失败,arm64 集成测试需在目标主机跑):见 [README.md](../README.md) 的 Platform Support 一节。
 
 ## 14. 相关文档导航

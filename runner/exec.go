@@ -109,6 +109,15 @@ func (task *RunningTask) GetResult() *Result {
 	return task.Result
 }
 
+// abortTrace marks the task as RUNTIME_ERROR, kills the process, and refreshes
+// resource stats for the final result check. Callers log their specific reason
+// before calling this, then break out of the trace loop or return.
+func (task *RunningTask) abortTrace() {
+	task.Result.RetCode = RUNTIME_ERROR
+	task.process.Kill()
+	task.parseRunningInfo()
+}
+
 func (task *RunningTask) trace() error {
 	process := task.process
 	process.IsKilled = false
@@ -133,8 +142,7 @@ func (task *RunningTask) trace() error {
 	alive, err := process.Wait()
 	if err != nil {
 		log.Infof("initial wait failed: %v", err)
-		task.Result.RetCode = RUNTIME_ERROR
-		process.Kill()
+		task.abortTrace()
 		return task.finalizeTraceResult()
 	}
 	if !alive {
@@ -158,9 +166,7 @@ func (task *RunningTask) trace() error {
 	resumeMode := task.traceResumeMode()
 	if err := process.SetPtraceOptions(traceSeccomp); err != nil {
 		log.Infof("PtraceSetOptions: err %v", err)
-		task.Result.RetCode = RUNTIME_ERROR
-		process.Kill()
-		task.parseRunningInfo()
+		task.abortTrace()
 		return task.finalizeTraceResult()
 	}
 	if !process.ContinueWithMode(resumeMode, 0) {
@@ -173,8 +179,7 @@ func (task *RunningTask) trace() error {
 		alive, err = process.Wait()
 		if err != nil {
 			log.Infof("wait in trace loop failed: %v", err)
-			task.Result.RetCode = RUNTIME_ERROR
-			process.Kill()
+			task.abortTrace()
 			break
 		}
 		if !alive {
@@ -199,9 +204,7 @@ func (task *RunningTask) trace() error {
 		if tracer.ConsumeAttachStop(process.CurrentPid, process.Status) {
 			if err := process.SetPtraceOptions(traceSeccomp); err != nil {
 				log.Infof("PtraceSetOptions(new child): err %v", err)
-				task.Result.RetCode = RUNTIME_ERROR
-				process.Kill()
-				task.parseRunningInfo()
+				task.abortTrace()
 				break
 			}
 			if !process.ContinueWithMode(resumeMode, 0) {
@@ -254,8 +257,7 @@ func (task *RunningTask) trace() error {
 		checkResult := tracer.checkSyscall(process.CurrentPid)
 		if checkResult == syscallCheckViolation {
 			log.Debugf("------- check syscall failed")
-			process.Kill()
-			task.Result.RetCode = RUNTIME_ERROR
+			task.abortTrace()
 			break
 		}
 		if checkResult == syscallCheckTraceeGone {
@@ -266,8 +268,7 @@ func (task *RunningTask) trace() error {
 		}
 		if checkResult == syscallCheckTracerError {
 			log.Warnf("ptrace register read failed for pid=%d", process.CurrentPid)
-			process.Kill()
-			task.Result.RetCode = RUNTIME_ERROR
+			task.abortTrace()
 			break
 		}
 		// before next ptrace, get result, always pass
@@ -300,9 +301,7 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 		newPid, err := process.GetEventPid()
 		if err != nil {
 			log.Infof("PtraceGetEventMsg failed: %v", err)
-			task.Result.RetCode = RUNTIME_ERROR
-			process.Kill()
-			task.parseRunningInfo()
+			task.abortTrace()
 			return false
 		}
 		process.AddTracee(newPid)
@@ -315,8 +314,7 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 		checkResult := tracer.checkSeccompTrace(process.CurrentPid)
 		if checkResult == syscallCheckViolation {
 			log.Debugf("------- check seccomp-traced syscall failed")
-			process.Kill()
-			task.Result.RetCode = RUNTIME_ERROR
+			task.abortTrace()
 			return false
 		}
 		if checkResult == syscallCheckTraceeGone {
@@ -325,8 +323,7 @@ func (task *RunningTask) handlePtraceEvent(process *Process, tracer *TracerDetec
 		}
 		if checkResult == syscallCheckTracerError {
 			log.Warnf("ptrace register read failed for seccomp event pid=%d", process.CurrentPid)
-			process.Kill()
-			task.Result.RetCode = RUNTIME_ERROR
+			task.abortTrace()
 			return false
 		}
 	default:

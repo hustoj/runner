@@ -347,3 +347,32 @@ func assertOutputFileSize(t *testing.T, file *os.File, want int64) {
 	assert.NoError(t, err)
 	assert.Equal(t, want, info.Size())
 }
+
+func TestAbortTraceSetsRuntimeErrorAndRefreshesResources(t *testing.T) {
+	SetLogger(zap.NewNop().Sugar())
+	defer SetLogger(nil)
+
+	process := NewProcess(100)
+	process.recordRusage(100, syscall.Rusage{
+		Utime:  syscall.Timeval{Sec: 2, Usec: 500_000},
+		Stime:  syscall.Timeval{Sec: 1, Usec: 0},
+		Maxrss: 4096,
+	})
+
+	task := RunningTask{
+		process: process,
+		Result:  &Result{},
+	}
+	task.Result.Init()
+	assert.Equal(t, ACCEPT, task.Result.RetCode)
+
+	task.abortTrace()
+
+	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
+	assert.True(t, process.IsKilled)
+	// parseRunningInfo should have refreshed TimeCost from the recorded rusage.
+	// 2.5s user + 1.0s system = 3.5s = 3_500_000us (GetTimeCost sums Usec + Sec*1e6).
+	assert.Equal(t, int64(3_500_000), task.Result.TimeCost)
+	// RusageMemory should reflect Maxrss from the recorded rusage.
+	assert.Equal(t, int64(4096), task.Result.RusageMemory)
+}

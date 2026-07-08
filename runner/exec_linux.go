@@ -631,16 +631,6 @@ func runChildProcess(spec childProcessSpec, startupPipeReadFD, startupPipeWriteF
 	reportChildStartupFailure(startupPipeWriteFD, childStageExec, errno)
 }
 
-func errnoFromError(err error, fallback syscall.Errno) syscall.Errno {
-	if err == nil {
-		return 0
-	}
-	if errno, ok := err.(syscall.Errno); ok {
-		return errno
-	}
-	return fallback
-}
-
 func setResourceLimit(code int, limit *syscall.Rlimit) syscall.Errno {
 	return rawSetrlimit(code, limit)
 }

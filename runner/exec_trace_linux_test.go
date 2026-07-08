@@ -263,18 +263,18 @@ func TestHandleSyscallStopResumesAllowedSyscall(t *testing.T) {
 
 func TestHandleSeccompEventDecisions(t *testing.T) {
 	tests := []struct {
-		name       string
-		tracer     *TracerDetect
-		getRegs    func(*syscall.PtraceRegs) error
-		wantOK     bool
-		wantResult int
-		wantKilled bool
+		name         string
+		tracer       *TracerDetect
+		getRegs      func(*syscall.PtraceRegs) error
+		wantDecision traceDecision
+		wantResult   int
+		wantKilled   bool
 	}{
 		{
-			name:       "tracee already gone",
-			tracer:     &TracerDetect{},
-			wantOK:     true,
-			wantResult: ACCEPT,
+			name:         "tracee already gone",
+			tracer:       &TracerDetect{},
+			wantDecision: traceContinue,
+			wantResult:   ACCEPT,
 		},
 		{
 			name:   "policy violation aborts",
@@ -283,9 +283,9 @@ func TestHandleSeccompEventDecisions(t *testing.T) {
 				setTestSyscallNumber(regs, uint64(syscall.SYS_GETPID))
 				return nil
 			},
-			wantOK:     false,
-			wantResult: RUNTIME_ERROR,
-			wantKilled: true,
+			wantDecision: traceStop,
+			wantResult:   RUNTIME_ERROR,
+			wantKilled:   true,
 		},
 		{
 			name:   "tracer error aborts",
@@ -293,9 +293,9 @@ func TestHandleSeccompEventDecisions(t *testing.T) {
 			getRegs: func(*syscall.PtraceRegs) error {
 				return syscall.EIO
 			},
-			wantOK:     false,
-			wantResult: RUNTIME_ERROR,
-			wantKilled: true,
+			wantDecision: traceStop,
+			wantResult:   RUNTIME_ERROR,
+			wantKilled:   true,
 		},
 		{
 			name:   "allowed syscall continues",
@@ -304,8 +304,8 @@ func TestHandleSeccompEventDecisions(t *testing.T) {
 				setTestSyscallNumber(regs, uint64(syscall.SYS_GETPID))
 				return nil
 			},
-			wantOK:     true,
-			wantResult: ACCEPT,
+			wantDecision: traceContinue,
+			wantResult:   ACCEPT,
 		},
 	}
 
@@ -325,12 +325,12 @@ func TestHandleSeccompEventDecisions(t *testing.T) {
 				}
 			}
 
-			ok := task.handleSeccompEvent(traceContext{
+			decision := task.handleSeccompEvent(traceContext{
 				process: process,
 				tracer:  tt.tracer,
 			})
 
-			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantDecision, decision)
 			assert.Equal(t, tt.wantResult, task.Result.RetCode)
 			assert.Equal(t, tt.wantKilled, process.IsKilled)
 		})
@@ -380,12 +380,12 @@ func TestHandleForkLikePtraceEventRegistersChildTracees(t *testing.T) {
 				return uint(tt.childPID), nil
 			}
 
-			ok := task.handleForkLikePtraceEvent(traceContext{
+			decision := task.handleForkLikePtraceEvent(traceContext{
 				process: process,
 				tracer:  tracer,
 			})
 
-			assert.True(t, ok)
+			assert.Equal(t, traceContinue, decision)
 			assert.True(t, process.HasTracee(tt.childPID))
 			assert.True(t, tracer.HasTracee(tt.childPID))
 			tgid, ok := process.ThreadGroup(tt.childPID)
@@ -412,12 +412,12 @@ func TestHandleForkLikePtraceEventAbortsWhenEventMessageFails(t *testing.T) {
 		return 0, syscall.EIO
 	}
 
-	ok := task.handleForkLikePtraceEvent(traceContext{
+	decision := task.handleForkLikePtraceEvent(traceContext{
 		process: process,
 		tracer:  tracer,
 	})
 
-	assert.False(t, ok)
+	assert.Equal(t, traceStop, decision)
 	assert.Equal(t, RUNTIME_ERROR, task.Result.RetCode)
 	assert.True(t, process.IsKilled)
 }

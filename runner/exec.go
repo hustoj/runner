@@ -143,7 +143,8 @@ func (task *RunningTask) trace() error {
 	if task.prepareInitialTraceStop(ctx) {
 		task.runTraceLoop(ctx)
 	}
-	return task.finalizeTraceResult()
+	task.finalizeTraceResult()
+	return nil
 }
 
 func (task *RunningTask) prepareTraceContext() (traceContext, error) {
@@ -279,7 +280,7 @@ func (task *RunningTask) handleAttachStop(ctx traceContext) traceDecision {
 
 func (task *RunningTask) handlePtraceEventStop(ctx traceContext) traceDecision {
 	process := ctx.process
-	if !task.handlePtraceEvent(ctx) {
+	if task.handlePtraceEvent(ctx) == traceStop {
 		return traceStop
 	}
 	if !process.ContinueWithMode(ctx.resumeMode, 0) {
@@ -362,7 +363,7 @@ func (task *RunningTask) traceResumeMode() traceResumeMode {
 	return traceResumeSyscallStops
 }
 
-func (task *RunningTask) handlePtraceEvent(ctx traceContext) bool {
+func (task *RunningTask) handlePtraceEvent(ctx traceContext) traceDecision {
 	process := ctx.process
 	switch process.PtraceEvent() {
 	case ptraceEventClone, ptraceEventFork, ptraceEventVFork:
@@ -372,17 +373,17 @@ func (task *RunningTask) handlePtraceEvent(ctx traceContext) bool {
 	default:
 		log.Warnf("unhandled ptrace event %d on pid=%d", process.PtraceEvent(), process.CurrentPid)
 	}
-	return true
+	return traceContinue
 }
 
-func (task *RunningTask) handleForkLikePtraceEvent(ctx traceContext) bool {
+func (task *RunningTask) handleForkLikePtraceEvent(ctx traceContext) traceDecision {
 	process := ctx.process
 	event := process.PtraceEvent()
 	newPid, err := process.GetEventPid()
 	if err != nil {
 		log.Infof("PtraceGetEventMsg failed: %v", err)
 		task.abortTrace()
-		return false
+		return traceStop
 	}
 	process.AddTracee(newPid)
 	if event != ptraceEventClone {
@@ -390,27 +391,27 @@ func (task *RunningTask) handleForkLikePtraceEvent(ctx traceContext) bool {
 	}
 	ctx.tracer.RegisterTracee(newPid, true)
 	log.Infof("registered traced child pid=%d from event=%d", newPid, event)
-	return true
+	return traceContinue
 }
 
-func (task *RunningTask) handleSeccompEvent(ctx traceContext) bool {
+func (task *RunningTask) handleSeccompEvent(ctx traceContext) traceDecision {
 	process := ctx.process
 	checkResult := ctx.tracer.checkSeccompTrace(process.CurrentPid)
 	if checkResult == syscallCheckViolation {
 		log.Debugf("------- check seccomp-traced syscall failed")
 		task.abortTrace()
-		return false
+		return traceStop
 	}
 	if checkResult == syscallCheckTraceeGone {
 		log.Debugf("skip seccomp trace inspection for pid=%d because tracee is already gone", process.CurrentPid)
-		return true
+		return traceContinue
 	}
 	if checkResult == syscallCheckTracerError {
 		log.Warnf("ptrace register read failed for seccomp event pid=%d", process.CurrentPid)
 		task.abortTrace()
-		return false
+		return traceStop
 	}
-	return true
+	return traceContinue
 }
 
 func (task *RunningTask) handleBrokenTraceStop(reason string) {
@@ -693,26 +694,22 @@ func (task *RunningTask) parseRunningInfo() {
 	task.refreshMemory()
 }
 
-func (task *RunningTask) finalizeTraceResult() error {
-	if err := task.refreshFinalMemoryResult(); err != nil {
-		return fmt.Errorf("refresh final memory result: %w", err)
-	}
+func (task *RunningTask) finalizeTraceResult() {
+	task.refreshFinalMemoryResult()
 	task.check()
-	return nil
 }
 
-func (task *RunningTask) refreshFinalMemoryResult() error {
+func (task *RunningTask) refreshFinalMemoryResult() {
 	if task.taskCtrl == nil {
-		return nil
+		return
 	}
 
 	status, err := task.taskCtrl.MemoryStatus()
 	if err != nil {
 		log.Infof("read final task memory status failed: %v", err)
-		return nil
+		return
 	}
 	task.Result.PeakMemory = status.PeakMemoryKB
-	return nil
 }
 
 func (task *RunningTask) cleanupRuntimeResources() {

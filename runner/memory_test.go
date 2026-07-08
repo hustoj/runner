@@ -200,9 +200,7 @@ func TestFinalizeTraceResultFailsClosedWhenFinalMemoryStatusFails(t *testing.T) 
 	}
 	task.Result.Init()
 
-	if err := task.finalizeTraceResult(); err != nil {
-		t.Fatalf("finalizeTraceResult() error = %v", err)
-	}
+	task.finalizeTraceResult()
 	if task.Result.RetCode != MEMORY_LIMIT {
 		t.Fatalf("RetCode = %d, want MEMORY_LIMIT", task.Result.RetCode)
 	}

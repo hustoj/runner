@@ -167,6 +167,7 @@ func stopForPtraceOptions() syscall.Errno {
 var (
 	writeChildCgroupGate = syscall.Write
 	wait4ChildStartup    = syscall.Wait4
+	wait4TraceeStop      = syscall.Wait4
 )
 
 func setAlarm(seconds uint64) syscall.Errno {
@@ -498,7 +499,7 @@ func waitForTraceeStop(pid int) (syscall.WaitStatus, error) {
 	var waitedPID int
 	if err := retryOnEINTR(func() error {
 		var err error
-		waitedPID, err = syscall.Wait4(pid, &status, 0, &rusage)
+		waitedPID, err = wait4TraceeStop(pid, &status, 0, &rusage)
 		return err
 	}); err != nil {
 		return 0, err

@@ -4,6 +4,7 @@ package runner
 
 import (
 	"errors"
+	"fmt"
 	"syscall"
 	"testing"
 
@@ -441,6 +442,7 @@ type ptraceHookStubs struct {
 	getRegs     func(pid int, regs *syscall.PtraceRegs) error
 	getEventMsg func(pid int) (uint, error)
 	setOptions  func(pid int, options int) error
+	wait4       func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error)
 }
 
 func stubPtraceHooks(t *testing.T) *ptraceHookStubs {
@@ -451,6 +453,7 @@ func stubPtraceHooks(t *testing.T) *ptraceHookStubs {
 	originalGetRegs := ptraceGetRegs
 	originalGetEventMsg := ptraceGetEventMsgCall
 	originalSetOptions := ptraceSetOptionsCall
+	originalWait4 := wait4TraceeStop
 
 	stubs := &ptraceHookStubs{
 		syscall: func(pid int, sig int) error {
@@ -467,6 +470,9 @@ func stubPtraceHooks(t *testing.T) *ptraceHookStubs {
 		},
 		setOptions: func(pid int, options int) error {
 			return errors.New("unexpected PtraceSetOptions")
+		},
+		wait4: func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+			return 0, errors.New("unexpected Wait4")
 		},
 	}
 
@@ -485,6 +491,9 @@ func stubPtraceHooks(t *testing.T) *ptraceHookStubs {
 	ptraceSetOptionsCall = func(pid int, options int) error {
 		return stubs.setOptions(pid, options)
 	}
+	wait4TraceeStop = func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		return stubs.wait4(pid, status, options, rusage)
+	}
 
 	t.Cleanup(func() {
 		ptraceSyscallCall = originalSyscall
@@ -492,6 +501,7 @@ func stubPtraceHooks(t *testing.T) *ptraceHookStubs {
 		ptraceGetRegs = originalGetRegs
 		ptraceGetEventMsgCall = originalGetEventMsg
 		ptraceSetOptionsCall = originalSetOptions
+		wait4TraceeStop = originalWait4
 	})
 
 	return stubs
@@ -516,6 +526,151 @@ func stoppedStatus(sig syscall.Signal) syscall.WaitStatus {
 
 func ptraceEventStopStatus(event int) syscall.WaitStatus {
 	return syscall.WaitStatus((event << 16) | (int(syscall.SIGTRAP) << 8) | 0x7f)
+}
+
+func sequenceWait4(t *testing.T, statuses []syscall.WaitStatus) func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+	t.Helper()
+	idx := 0
+	return func(pid int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		if idx >= len(statuses) {
+			t.Fatalf("unexpected wait4 call #%d (only %d configured)", idx, len(statuses))
+		}
+		*status = statuses[idx]
+		idx++
+		return pid, nil
+	}
+}
+
+func TestPrepareHybridSeccompTraceeDrivesHandshake(t *testing.T) {
+	stubs := stubPtraceHooks(t)
+	const pid = traceHandlerTestPIDBase + 50
+
+	var calls []string
+
+	waitSeq := sequenceWait4(t, []syscall.WaitStatus{
+		stoppedStatus(syscall.SIGSTOP),
+		ptraceEventStopStatus(ptraceEventSeccomp),
+	})
+	stubs.wait4 = func(gotPID int, status *syscall.WaitStatus, options int, rusage *syscall.Rusage) (int, error) {
+		calls = append(calls, "wait4")
+		return waitSeq(gotPID, status, options, rusage)
+	}
+
+	stubs.setOptions = func(gotPID int, options int) error {
+		assert.Equal(t, pid, gotPID)
+		assert.NotZero(t, options&unix.PTRACE_O_TRACESECCOMP, "ptrace options must enable seccomp tracing")
+		calls = append(calls, "setOptions")
+		return nil
+	}
+
+	stubs.cont = func(gotPID int, sig int) error {
+		assert.Equal(t, pid, gotPID)
+		calls = append(calls, fmt.Sprintf("cont(sig=%d)", sig))
+		return nil
+	}
+
+	stubs.getRegs = func(gotPID int, regs *syscall.PtraceRegs) error {
+		assert.Equal(t, pid, gotPID)
+		calls = append(calls, "getRegs")
+		setTestSyscallNumber(regs, uint64(syscall.SYS_EXECVE))
+		return nil
+	}
+
+	err := prepareHybridSeccompTracee(pid)
+	assert.NoError(t, err)
+
+	assert.Equal(t, []string{
+		"wait4", "setOptions", "cont(sig=0)", "wait4", "getRegs", "cont(sig=0)",
+	}, calls, "handshake must arm TRACESECCOMP before the first resume and verify the seccomp stop before the second")
+}
+
+func TestPrepareHybridSeccompTraceeAbortsOnError(t *testing.T) {
+	const pid = traceHandlerTestPIDBase + 51
+
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, stubs *ptraceHookStubs)
+		wantErr string
+	}{
+		{
+			name: "first stop not SIGSTOP",
+			setup: func(_ *testing.T, s *ptraceHookStubs) {
+				s.wait4 = func(_ int, status *syscall.WaitStatus, _ int, _ *syscall.Rusage) (int, error) {
+					*status = stoppedStatus(syscall.SIGTERM)
+					return pid, nil
+				}
+			},
+			wantErr: "unexpected hybrid ptrace sync status",
+		},
+		{
+			name: "second stop not seccomp event",
+			setup: func(t *testing.T, s *ptraceHookStubs) {
+				s.wait4 = sequenceWait4(t, []syscall.WaitStatus{
+					stoppedStatus(syscall.SIGSTOP),
+					stoppedStatus(syscall.SIGTRAP),
+				})
+			},
+			wantErr: "unexpected hybrid seccomp event status",
+		},
+		{
+			name: "startup syscall not execve",
+			setup: func(t *testing.T, s *ptraceHookStubs) {
+				s.wait4 = sequenceWait4(t, []syscall.WaitStatus{
+					stoppedStatus(syscall.SIGSTOP),
+					ptraceEventStopStatus(ptraceEventSeccomp),
+				})
+				s.getRegs = func(_ int, regs *syscall.PtraceRegs) error {
+					setTestSyscallNumber(regs, uint64(syscall.SYS_GETPID))
+					return nil
+				}
+			},
+			wantErr: "unexpected startup seccomp syscall",
+		},
+		{
+			name: "set ptrace options fails",
+			setup: func(_ *testing.T, s *ptraceHookStubs) {
+				s.wait4 = func(_ int, status *syscall.WaitStatus, _ int, _ *syscall.Rusage) (int, error) {
+					*status = stoppedStatus(syscall.SIGSTOP)
+					return pid, nil
+				}
+				s.setOptions = func(int, int) error { return syscall.EIO }
+			},
+			wantErr: "set ptrace options before seccomp install",
+		},
+		{
+			name: "continue to seccomp event fails",
+			setup: func(_ *testing.T, s *ptraceHookStubs) {
+				s.wait4 = func(_ int, status *syscall.WaitStatus, _ int, _ *syscall.Rusage) (int, error) {
+					*status = stoppedStatus(syscall.SIGSTOP)
+					return pid, nil
+				}
+				s.cont = func(int, int) error { return syscall.EIO }
+			},
+			wantErr: "continue child to seccomp execve event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubs := stubPtraceHooks(t)
+
+			// Defaults that let the handshake advance to the point under test
+			// unless a case overrides them.
+			stubs.setOptions = func(int, int) error { return nil }
+			stubs.cont = func(int, int) error { return nil }
+			stubs.getRegs = func(_ int, regs *syscall.PtraceRegs) error {
+				setTestSyscallNumber(regs, uint64(syscall.SYS_EXECVE))
+				return nil
+			}
+			tt.setup(t, stubs)
+
+			err := prepareHybridSeccompTracee(pid)
+			assert.Error(t, err)
+			if err != nil {
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+		})
+	}
 }
 
 func useNopLogger(t *testing.T) {

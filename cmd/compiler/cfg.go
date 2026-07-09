@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/shlex"
 	"github.com/koding/multiconfig"
+
+	"github.com/hustoj/runner/runner"
 )
 
 const compilerBootstrapConfigEnv = "RUNNER_COMPILER_BOOTSTRAP_CONFIG"
@@ -180,25 +181,7 @@ func (config *CompileConfig) ResolveExec() (string, []string, error) {
 	if err := config.parseCommand(); err != nil {
 		return "", nil, err
 	}
-	if len(config.commands) == 0 || config.commands[0] == "" {
-		return "", nil, errors.New("empty command")
-	}
-
-	command := config.commands[0]
-	binary := command
-	if !strings.Contains(command, "/") {
-		resolved, err := exec.LookPath(command)
-		if err != nil {
-			return "", nil, err
-		}
-		binary = resolved
-	}
-
-	args := make([]string, 0, len(config.commands))
-	args = append(args, binary)
-	args = append(args, config.commands[1:]...)
-
-	return binary, args, nil
+	return runner.ResolveExecCommand(config.commands)
 }
 
 func loadConfig() (*CompileConfig, error) {

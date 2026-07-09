@@ -233,13 +233,24 @@ func (tc *TaskConfig) ResolveExec() (string, []string, error) {
 	if err := tc.parseCommand(); err != nil {
 		return "", nil, err
 	}
-	if len(tc.commands) == 0 || tc.commands[0] == "" {
+	return resolveExecCommand(tc.commands, tc.ChrootDir == "")
+}
+
+// ResolveExecCommand converts a parsed command into the executable path and argv.
+// Commands without a slash are resolved through PATH and argv[0] is canonicalized
+// to the resolved binary path.
+func ResolveExecCommand(commands []string) (string, []string, error) {
+	return resolveExecCommand(commands, true)
+}
+
+func resolveExecCommand(commands []string, lookPath bool) (string, []string, error) {
+	if len(commands) == 0 || commands[0] == "" {
 		return "", nil, errors.New("empty command")
 	}
 
-	command := tc.commands[0]
+	command := commands[0]
 	binary := command
-	if tc.ChrootDir == "" && !strings.Contains(command, "/") {
+	if lookPath && !strings.Contains(command, "/") {
 		resolved, err := exec.LookPath(command)
 		if err != nil {
 			return "", nil, err
@@ -247,9 +258,9 @@ func (tc *TaskConfig) ResolveExec() (string, []string, error) {
 		binary = resolved
 	}
 
-	args := make([]string, 0, len(tc.commands))
+	args := make([]string, 0, len(commands))
 	args = append(args, binary)
-	args = append(args, tc.commands[1:]...)
+	args = append(args, commands[1:]...)
 
 	return binary, args, nil
 }

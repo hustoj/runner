@@ -373,6 +373,26 @@ func TestResolveExecLooksUpPathAndCanonicalizesArgv0(t *testing.T) {
 	}
 }
 
+func TestResolveExecCommandSkipsPathLookupWhenDisabled(t *testing.T) {
+	binary, args, err := resolveExecCommand([]string{"sh", "-c", "printf ok"}, false)
+	if err != nil {
+		t.Fatalf("resolveExecCommand() error = %v", err)
+	}
+	if binary != "sh" {
+		t.Fatalf("resolveExecCommand() binary = %q, want %q", binary, "sh")
+	}
+
+	wantArgs := []string{"sh", "-c", "printf ok"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("resolveExecCommand() args = %v, want %v", args, wantArgs)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("resolveExecCommand() args[%d] = %q, want %q", i, args[i], wantArgs[i])
+		}
+	}
+}
+
 func TestResolveExecPreservesExplicitArgsPrecedence(t *testing.T) {
 	tc := &TaskConfig{Command: "/bin/echo", Args: []string{"hello world"}}
 	binary, args, err := tc.ResolveExec()

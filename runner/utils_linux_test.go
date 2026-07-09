@@ -45,6 +45,10 @@ func TestBuildMinimalEnvRemovesDropKeysAndUnsafeEntries(t *testing.T) {
 }
 
 func TestCloseNonStdioFiles(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("closing non-stdio fds inside a race-instrumented Go test process can close runtime epoll fds")
+	}
+
 	if os.Getenv("TEST_CLOSE_FDS") == "1" {
 		f, err := os.Open("/dev/null")
 		if err != nil {

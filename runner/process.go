@@ -10,6 +10,14 @@ type processStop struct {
 	rusage syscall.Rusage
 }
 
+// finalizedRusageEntry preserves a tracee's final rusage after it exits, so
+// cumulative CPU time and peak memory stay correct once the per-pid state is
+// dropped (preventing a reused PID from inheriting the prior occupant's stats).
+type finalizedRusageEntry struct {
+	rusage  syscall.Rusage
+	groupID int
+}
+
 type traceResumeMode uint8
 
 const (
@@ -18,16 +26,17 @@ const (
 )
 
 type Process struct {
-	Pid          int
-	CurrentPid   int
-	Status       syscall.WaitStatus
-	Rusage       syscall.Rusage
-	IsKilled     bool
-	tracees      map[int]struct{}
-	rusageByPid  map[int]syscall.Rusage
-	rusageOffset map[int]int64
-	threadGroups map[int]int
-	pendingStops map[int]processStop
+	Pid             int
+	CurrentPid      int
+	Status          syscall.WaitStatus
+	Rusage          syscall.Rusage
+	IsKilled        bool
+	tracees         map[int]struct{}
+	rusageByPid     map[int]syscall.Rusage
+	rusageOffset    map[int]int64
+	threadGroups    map[int]int
+	pendingStops    map[int]processStop
+	finalizedRusage []finalizedRusageEntry
 }
 
 func (process *Process) ensureStateMaps() {
@@ -107,6 +116,21 @@ func (process *Process) AddTracee(pid int) {
 func (process *Process) RemoveTracee(pid int) {
 	delete(process.tracees, pid)
 	delete(process.pendingStops, pid)
+	// Move the tracee's final rusage into the finalized store before dropping its
+	// per-pid state: cumulative CPU time (GetTimeCost) and peak memory (Memory)
+	// keep counting it, while a reused PID cannot inherit the prior occupant's stats.
+	if ru, ok := process.rusageByPid[pid]; ok {
+		groupID := pid
+		if tgid, ok := process.threadGroups[pid]; ok && tgid > 0 {
+			groupID = tgid
+		}
+		process.finalizedRusage = append(process.finalizedRusage, finalizedRusageEntry{
+			rusage:  ru,
+			groupID: groupID,
+		})
+		delete(process.rusageByPid, pid)
+	}
+	delete(process.threadGroups, pid)
 }
 
 func (process *Process) HasTracee(pid int) bool {
@@ -188,6 +212,11 @@ func (process *Process) Memory() int64 {
 			groupMaxRSS[groupID] = ru.Maxrss
 		}
 	}
+	for _, fe := range process.finalizedRusage {
+		if fe.rusage.Maxrss > groupMaxRSS[fe.groupID] {
+			groupMaxRSS[fe.groupID] = fe.rusage.Maxrss
+		}
+	}
 	var total int64
 	for groupID, memory := range groupMaxRSS {
 		if offset, ok := process.rusageOffset[groupID]; ok {
@@ -212,16 +241,25 @@ func (process *Process) Exited() bool {
 	return false
 }
 
+// rusageCpuMicros returns user+system CPU time of a single rusage in microseconds.
+func rusageCpuMicros(ru syscall.Rusage) int64 {
+	// Timeval.Usec is int32 on darwin and int64 on linux; the int64()
+	// conversion is required for darwin and reported as redundant on linux.
+	uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec) //nolint:unconvert // cross-platform: Usec type differs
+	return uSec + (ru.Utime.Sec+ru.Stime.Sec)*microsPerSecond
+}
+
 func (process *Process) GetTimeCost() int64 {
 	// CPU time is intentionally cumulative across all waited tracees. We do not
 	// deduplicate by thread group here, because wait4 accounts usage for the
 	// specific waited child/task rather than reporting a shared wall-clock value.
+	// Finalized entries keep exited tracees' CPU in the total after RemoveTracee.
 	var total int64
 	for _, ru := range process.rusageByPid {
-		// Timeval.Usec is int32 on darwin and int64 on linux; the int64()
-		// conversion is required for darwin and reported as redundant on linux.
-		uSec := int64(ru.Utime.Usec) + int64(ru.Stime.Usec) //nolint:unconvert // cross-platform: Usec type differs
-		total += uSec + (ru.Utime.Sec+ru.Stime.Sec)*microsPerSecond
+		total += rusageCpuMicros(ru)
+	}
+	for _, fe := range process.finalizedRusage {
+		total += rusageCpuMicros(fe.rusage)
 	}
 	return total
 }

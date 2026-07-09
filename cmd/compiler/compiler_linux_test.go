@@ -4,8 +4,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -339,6 +341,67 @@ func TestHandleRejectsInvalidSandboxConfig(t *testing.T) {
 	}
 }
 
+func TestCompilerCgroupCleanupKillsDetachedHelper(t *testing.T) {
+	requireCompilerCgroupBackend(t)
+	requireCommand(t, "sh")
+	requireCommand(t, "setsid")
+	requireCommand(t, "sleep")
+
+	compilerPath := filepath.Join(t.TempDir(), "compiler")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", compilerPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build compiler error = %v\n%s", err, output)
+	}
+
+	workDir := t.TempDir()
+	if err := os.Chmod(workDir, 0o777); err != nil {
+		t.Fatalf("chmod work dir: %v", err)
+	}
+
+	sleepArg := strconv.Itoa(50000 + os.Getpid()%10000)
+	if pids := sleepProcessPIDsWithArg(t, sleepArg); len(pids) > 0 {
+		t.Skipf("sleep %s already running as pids %v", sleepArg, pids)
+	}
+	t.Cleanup(func() {
+		killSleepProcessesWithArg(t, sleepArg)
+	})
+
+	compileConfig := fmt.Sprintf(`{
+	"CPU": 1,
+	"Memory": 128,
+	"Output": 16,
+	"Stack": 8,
+	"MaxProcs": 32,
+	"Command": "sh",
+	"Args": ["-c", "setsid sleep %s & exit 0"],
+	"LogPath": "/dev/stderr"%s
+}
+`, sleepArg, compilerCleanupRunIdentityJSON())
+	if err := os.WriteFile(filepath.Join(workDir, "compile.json"), []byte(compileConfig), 0o644); err != nil {
+		t.Fatalf("write compile.json: %v", err)
+	}
+
+	cmd := exec.Command(compilerPath)
+	cmd.Dir = workDir
+	cmd.Env = compilerCleanupEnv()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compiler error = %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), `"success":true`) {
+		t.Fatalf("compiler output = %s, want success=true", output)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pids := sleepProcessPIDsWithArg(t, sleepArg); len(pids) == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("residual detached sleep process found with arg %s", sleepArg)
+}
+
 func TestHandleMovesCompilerIntoTaskController(t *testing.T) {
 	withCompilerEffectiveUID(t, 1000)
 
@@ -501,4 +564,123 @@ func withCompilerWait4(t *testing.T, wait4 func(int, *syscall.WaitStatus, int, *
 	t.Cleanup(func() {
 		compilerWait4 = previous
 	})
+}
+
+func requireCompilerCgroupBackend(t *testing.T) {
+	t.Helper()
+
+	controller, err := runner.NewCgroupTaskController(128, 32)
+	if err != nil {
+		t.Skipf("compiler cgroup backend unavailable: %v", err)
+	}
+	if err := controller.Cleanup(); err != nil {
+		t.Fatalf("cleanup compiler cgroup precheck: %v", err)
+	}
+}
+
+func requireCommand(t *testing.T, name string) {
+	t.Helper()
+
+	if _, err := exec.LookPath(name); err != nil {
+		t.Skipf("%s unavailable: %v", name, err)
+	}
+}
+
+func compilerCleanupRunIdentityJSON() string {
+	if os.Geteuid() != 0 {
+		return ""
+	}
+	uid, gid := compilerCleanupRunIdentity()
+	return fmt.Sprintf(",\n\t\"RunUID\": %d,\n\t\"RunGID\": %d", uid, gid)
+}
+
+func compilerCleanupRunIdentity() (int, int) {
+	if uid, gid, ok := positiveEnvUIDGID("COMPILECONFIG_RUNUID", "COMPILECONFIG_RUNGID"); ok {
+		return uid, gid
+	}
+	if uid, gid, ok := positiveEnvUIDGID("SUDO_UID", "SUDO_GID"); ok {
+		return uid, gid
+	}
+	return 65534, 65534
+}
+
+func positiveEnvUIDGID(uidKey string, gidKey string) (int, int, bool) {
+	uid, uidOK := positiveEnvInt(uidKey)
+	gid, gidOK := positiveEnvInt(gidKey)
+	return uid, gid, uidOK && gidOK
+}
+
+func positiveEnvInt(key string) (int, bool) {
+	value := os.Getenv(key)
+	if value == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func compilerCleanupEnv() []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "COMPILECONFIG_") {
+			continue
+		}
+		switch key {
+		case compilerBootstrapEnv, compilerBootstrapConfigEnv, compilerCgroupGateFDEnv:
+			continue
+		default:
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func sleepProcessPIDsWithArg(t *testing.T, arg string) []int {
+	t.Helper()
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Skipf("/proc unavailable: %v", err)
+	}
+
+	var pids []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		comm, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "comm"))
+		if err != nil || strings.TrimSpace(string(comm)) != "sleep" {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		if sleepCmdlineHasArg(cmdline, arg) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func sleepCmdlineHasArg(cmdline []byte, arg string) bool {
+	fields := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+	if len(fields) < 2 {
+		return false
+	}
+	return filepath.Base(fields[0]) == "sleep" && fields[1] == arg
+}
+
+func killSleepProcessesWithArg(t *testing.T, arg string) {
+	t.Helper()
+
+	for _, pid := range sleepProcessPIDsWithArg(t, arg) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
 }

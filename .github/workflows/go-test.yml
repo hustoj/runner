@@ -6,6 +6,9 @@ on:
       - main
       - master
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 20 * * 0"
 
 jobs:
   unit-tests:
@@ -24,6 +27,22 @@ jobs:
       - name: Run Go tests as non-root
         run: make test-unit
 
+  race-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go race tests as non-root
+        run: make test-race
+
   sandbox-behavior-root:
     runs-on: ubuntu-latest
 
@@ -41,3 +60,55 @@ jobs:
             -e GOMODCACHE=/tmp/go/pkg/mod \
             golang:1.25 \
             bash -c 'make test-sandbox-behavior-root'
+
+  integration-testall:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run integration tests in privileged Linux container
+        run: |
+          docker run --rm --privileged \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e GOCACHE=/tmp/go-build \
+            -e GOPATH=/tmp/go \
+            -e GOMODCACHE=/tmp/go/pkg/mod \
+            golang:1.25 \
+            bash -lc '
+              set -euo pipefail
+
+              apt-get update
+              apt-get install -y --no-install-recommends gcc make default-jdk
+
+              if [ "$(stat -fc %T /sys/fs/cgroup)" != "cgroup2fs" ]; then
+                echo "Skipping make testall: cgroup v2 is required."
+                exit 0
+              fi
+
+              cgroup_parent=/sys/fs/cgroup/runner-testall-ci
+              if ! mkdir -p "$cgroup_parent" 2>/dev/null; then
+                echo "Skipping make testall: /sys/fs/cgroup is not writable."
+                exit 0
+              fi
+              cleanup() {
+                find "$cgroup_parent" -mindepth 1 -depth -type d -exec rmdir {} \; 2>/dev/null || true
+                echo -memory -pids > "$cgroup_parent/cgroup.subtree_control" 2>/dev/null || true
+                rmdir "$cgroup_parent" 2>/dev/null || true
+              }
+              trap cleanup EXIT
+
+              echo +memory +pids > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+              if ! echo +memory +pids > "$cgroup_parent/cgroup.subtree_control" 2>/dev/null; then
+                echo "Skipping make testall: memory and pids controllers cannot be delegated."
+                exit 0
+              fi
+
+              export RUNNER_CGROUP_PARENT=/${cgroup_parent#/sys/fs/cgroup/}
+              export TASKCONFIG_RUNUID=65534
+              export TASKCONFIG_RUNGID=65534
+              make testall
+            '

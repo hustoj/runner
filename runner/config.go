@@ -16,7 +16,6 @@ type TaskConfig struct {
 	CPU           int `default:"3"`   // CPU time limit in seconds
 	WallClock     int `default:"0"`   // Wall-clock time limit in seconds (0 = use CPU)
 	Memory        int `default:"256"` // Total task memory budget in MB (Linux cgroup v2 memory.max)
-	MemoryReserve int `default:"0"`   // Deprecated: ignored by the Linux runtime memory controller
 	Output        int `default:"16"`  // Output size limit in MB
 	Stack         int `default:"8"`   // Stack size limit in MB
 	MaxProcs      int `default:"16"`  // Max number of processes/threads per task cgroup (Linux cgroup v2 pids.max)
@@ -61,8 +60,6 @@ const privilegedChildOptInRequiredError = "running as root without dropping to u
 
 const namespacePrivilegeWarning = "Namespaces are enabled but no privilege drop configured - namespace isolation may fail"
 
-const memoryReserveDeprecatedWarning = "MemoryReserve is deprecated and ignored by the Linux cgroup v2 runtime"
-
 const privilegedChildWarning = "AllowPrivilegedChild is set: child will run as root without chroot/namespace isolation (high-risk mode)"
 
 const (
@@ -81,9 +78,6 @@ func (tc *TaskConfig) Validate() error {
 	}
 	if tc.Memory < 0 {
 		return fmt.Errorf("memory must be >= 0 (got %d)", tc.Memory)
-	}
-	if tc.MemoryReserve < 0 {
-		return fmt.Errorf("memoryReserve must be >= 0 (got %d)", tc.MemoryReserve)
 	}
 	if tc.Output < 0 {
 		return fmt.Errorf("output must be >= 0 (got %d)", tc.Output)
@@ -141,10 +135,6 @@ func (tc *TaskConfig) ValidationWarnings() []string {
 
 	if tc.RunUID < 0 && (tc.UseMountNS || tc.UsePIDNS || tc.UseIPCNS || tc.UseUTSNS || tc.UseNetNS) {
 		warnings = append(warnings, namespacePrivilegeWarning)
-	}
-
-	if tc.MemoryReserve > 0 {
-		warnings = append(warnings, memoryReserveDeprecatedWarning)
 	}
 
 	if tc.AllowPrivilegedChild {

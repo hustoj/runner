@@ -15,10 +15,6 @@
   - 单位：MB
   - 语义：任务的**总内存预算**
   - Linux 运行时直接把它映射到 cgroup v2 `memory.max`
-- `MemoryReserve`
-  - 单位：MB
-  - 状态：**已废弃**
-  - Linux 运行时不再使用该字段；保留它只是为了兼容旧 `case.json`
 - `Stack`
   - 单位：MB
   - 语义：独立的栈上限，直接映射到 `RLIMIT_STACK`
@@ -152,6 +148,6 @@ runner 的父 cgroup 选择顺序：
 - 新的 Linux 契约里，`Memory` 是**总预算**，不是 RSS-like 采样阈值
 - 管理型运行时要在这个总预算里自己切 heap / metaspace / code cache
 - 例如 JVM 不应再把 `-Xmx` 直接顶到 `Memory`
-- 旧的 `MemoryReserve` workaround 已经移除；如果旧部署依赖它，需要改成：
+- 旧的 `MemoryReserve` workaround 已被移除（字段也已从 `TaskConfig` 删除）；如果旧部署依赖它，需要改成：
   - 提供合适的 cgroup v2 delegation
   - 重新校准语言运行时参数

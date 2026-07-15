@@ -142,7 +142,6 @@ func TestLoadConfigRejectsNegativeResourceLimits(t *testing.T) {
 		{"CPU", `{"CPU":-1}`, "cpu must be >= 0"},
 		{"WallClock", `{"WallClock":-1}`, "wallClock must be >= 0"},
 		{"Memory", `{"Memory":-1}`, "memory must be >= 0"},
-		{"MemoryReserve", `{"MemoryReserve":-1}`, "memoryReserve must be >= 0"},
 		{"Output", `{"Output":-1}`, "output must be >= 0"},
 		{"Stack", `{"Stack":-1}`, "stack must be >= 0"},
 	}
@@ -221,31 +220,6 @@ func TestLoadConfigDefaultsWallClockLimitToCPU(t *testing.T) {
 		}
 		if got := cfg.effectiveWallClockLimitSeconds(); got != cfg.CPU {
 			t.Fatalf("effectiveWallClockLimitSeconds() = %d, want CPU %d", got, cfg.CPU)
-		}
-	})
-}
-
-func TestLoadConfigWarnsOnDeprecatedMemoryReserve(t *testing.T) {
-	restoreGlobals := preserveConfigTestGlobals()
-	defer restoreGlobals()
-
-	t.Setenv("RUNNER_ALLOW_UNSAFE_TEST_MODE", "1")
-	runWithTempCaseJSON(t, `{"MemoryReserve":32,"AllowPrivilegedChild":true}`, func() {
-		SetLogger(nil)
-
-		cfg, err := LoadConfig()
-		if err != nil {
-			t.Fatalf("LoadConfig() error = %v", err)
-		}
-		warnings := cfg.ValidationWarnings()
-		if len(warnings) != 2 {
-			t.Fatalf("ValidationWarnings() len = %d, want 2", len(warnings))
-		}
-		if warnings[0] != memoryReserveDeprecatedWarning {
-			t.Fatalf("ValidationWarnings()[0] = %q, want %q", warnings[0], memoryReserveDeprecatedWarning)
-		}
-		if warnings[1] != privilegedChildWarning {
-			t.Fatalf("ValidationWarnings()[1] = %q, want %q", warnings[1], privilegedChildWarning)
 		}
 	})
 }

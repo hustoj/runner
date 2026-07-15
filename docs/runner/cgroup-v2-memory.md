@@ -119,11 +119,7 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 
 ## 7. 兼容性与迁移
 
-`TaskConfig.MemoryReserve` 仍然保留在结构体里，只为了兼容旧 `case.json`。在 Linux runtime 中：
-
-- 默认值已改成 `0`
-- 非零时会给出 warning
-- 运行时行为完全忽略它
+`TaskConfig.MemoryReserve` 已从结构体中删除。旧 `case.json` 中如果仍包含该字段，`multiconfig` 会静默忽略未知字段，不会导致加载失败。
 
 对于管理型运行时（例如 JVM）：
 
@@ -135,7 +131,7 @@ Runner 需要运行在 cgroup v2 环境中，并满足：
 迁移后可以直接消除原设计中的三个问题：
 
 1. 不再依赖 `/proc` 采样捕获短生命周期 MLE
-2. 不再需要 `MemoryReserve` 这种地址空间缓冲 workaround
+2. `MemoryReserve` 这种地址空间缓冲 workaround 已彻底移除
 3. Memory 的 enforcement 与 verdict 终于共用同一套内核记账
 
 ## 9. Java follow-up

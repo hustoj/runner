@@ -122,7 +122,8 @@ func TestRunProcessDropsAllCapabilitiesBeforeTraceLoop(t *testing.T) {
 			t.Fatalf("readProcStatusFields(capabilities) error = %v", err)
 		}
 		for _, field := range []string{"CapEff", "CapPrm", "CapInh", "CapBnd"} {
-			if firstField(status[field]) != "0" {
+			value, err := strconv.ParseUint(firstField(status[field]), 16, 64)
+			if err != nil || value != 0 {
 				t.Fatalf("%s = %v, want 0 (all capabilities dropped)", field, status[field])
 			}
 		}

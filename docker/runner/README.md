@@ -19,7 +19,8 @@
 - `VOLUME /data`
 - `VOLUME /var/log/runner`
 - `CMD ["runner"]`
-- 镜像未设置 `USER`；以 root 启动时，`case.json` 必须显式配置非 root `RunUID` / `RunGID`，否则 runner 会拒绝启动
+- 镜像默认 `USER judger`（UID/GID 1536）；需要管理 task cgroup 的受信任启动器可显式以 root 启动，但 `case.json` 必须配置非 root `RunUID` / `RunGID`，否则 runner 会拒绝启动
+- 与新版 judger 配合时，仅挂载已委派的 cgroup 子树，启动器使用 `SYS_PTRACE` 跟踪已降权的子进程；不需要 privileged 容器或 writable 的宿主 cgroup 根目录
 
 ## 相关目录
 

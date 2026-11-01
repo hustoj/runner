@@ -1,5 +1,8 @@
 MAKEFLAGS += -s
 
+RUNNER_IMAGE ?= runner:v2
+COMPILER_IMAGE ?= compiler:v2
+
 SANDBOX_BEHAVIOR_NONROOT_TESTS := TestRunProcessSetsNoNewPrivsBeforeTraceLoop|TestRunProcessPropagatesSandboxPermissionFailures
 SANDBOX_BEHAVIOR_ROOT_TESTS := TestRunProcessSetsCredentialsBeforeTraceLoop|TestRunProcessCreatesMountNamespaceBeforeTraceLoop|TestRunProcessAppliesChrootAndWorkDirBeforeTraceLoop|TestRunProcessDropsAllCapabilitiesBeforeTraceLoop
 
@@ -14,12 +17,12 @@ compiler:
 	go build -o bin/compile ./cmd/compiler
 
 build-docker-runner:
-	go build -o docker/runner/runner ./cmd/runner
-	docker build -t runner:v1 ./docker/runner
+	CGO_ENABLED=0 GOOS=linux go build -o docker/runner/runner ./cmd/runner
+	docker build -t $(RUNNER_IMAGE) ./docker/runner
 
 build-docker-compiler:
-	go build -o docker/compiler/compiler ./cmd/compiler
-	docker build -t compiler:v1 ./docker/compiler
+	CGO_ENABLED=0 GOOS=linux go build -o docker/compiler/compiler ./cmd/compiler
+	docker build -t $(COMPILER_IMAGE) ./docker/compiler
 
 prepare:
 	go build -o bin/test ./cmd/test
